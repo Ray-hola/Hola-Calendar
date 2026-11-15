@@ -10777,8 +10777,10 @@ body.is-resizing-agent { user-select: none; }
 #agentReplyBadge { color: var(--accent-dark); }
 .plan-pick { min-width: 36px; min-height: 36px; justify-content: center; margin: -8px -5px -8px -8px; flex-shrink: 0; }
 .plan-select-label { min-height: 36px; padding: 0 4px; }
-.plan-selection .plan-accept-selected { font-weight: 600; }
 .plan-save-status { color: var(--muted); font-size: 11px; }
+.agent-message.agent-intent { display: grid; gap: 10px; max-width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.agent-intent p { margin: 0; line-height: 1.6; }
+.agent-intent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .plan-foot .plan-sum { min-width: 70px; font-size: 11px; }
 .agent-action-fields { margin: 0; display: grid; gap: 8px; }
 .agent-action-fields > div { display: grid; grid-template-columns: 76px minmax(0,1fr); gap: 8px; }
@@ -10807,7 +10809,7 @@ body.is-resizing-agent { user-select: none; }
 @container assistant (max-width: 560px) {
   .plan-foot { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
   .plan-foot .plan-add { grid-column: 1; grid-row: 1; justify-self: start; }
-  .plan-foot .plan-cancel { grid-column: 2; grid-row: 1; }
+  .plan-foot .plan-reject-selected { grid-column: 2; grid-row: 1; }
   .plan-foot .plan-sum { grid-column: 1; grid-row: 2; align-self: center; }
   .plan-foot .plan-confirm { grid-column: 2; grid-row: 2; }
 }

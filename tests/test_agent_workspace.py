@@ -245,8 +245,9 @@ class AgentWorkspaceTests(unittest.TestCase):
         self.assertNotIn('continuations',json.loads(json.loads(self.seen[-1].data)['messages'][1]['content']))
 
     def test_oversized_model_replies_remain_safe_to_replay(self):
-        result=self.chat(_chat('长'*50000))
-        self.assertLessEqual(len(result['content']),40000);self.assertTrue(result['incomplete'])
+        import server
+        result=self.chat(_chat('长'*(server.MAX_MESSAGE_CHARS+10000)))
+        self.assertLessEqual(len(result['content']),server.MAX_MESSAGE_CHARS);self.assertTrue(result['incomplete'])
 
     def test_archived_completion_and_file_indexes_keep_existing_visibility(self):
         self.project.update(status='done',completedAt='2026-11-03T10:00:00+08:00')
