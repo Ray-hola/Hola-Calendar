@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 100" role="img" aria-label="Hola! sweep mark">
+  <!-- three cards swept into one neat, checked card -->
+  <rect x="22" y="30" width="78" height="54" rx="11" fill="#D97757" opacity="0.22" transform="rotate(-20 61 57)"/>
+  <rect x="26" y="30" width="78" height="54" rx="11" fill="#D97757" opacity="0.5" transform="rotate(-10 65 57)"/>
+  <rect x="30" y="30" width="78" height="54" rx="11" fill="#D97757"/>
+  <path d="M53 57 L63 67 L84 45" fill="none" stroke="#FFFDF9" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
