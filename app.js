@@ -87,6 +87,84 @@ function syncAccountLanguage(user){
   else{url.searchParams.set('lang',lang);url.searchParams.set('langAuto','1')}
   location.replace(url.href);return true;
 }
+/* 外观: a theme (Anthropic风 / Tempo风) and one of its palettes. The team
+   default lives in settings (S.appearance; admins set it in 系统设置 → 外观);
+   anyone may follow it or pick their own in the account menu, kept in this
+   browser under APPEARANCE_KEY. Both end up as data-theme / data-palette on
+   <html>, which an inline script in index.html also sets from storage before
+   the stylesheet loads, so a reload never flashes the other theme. The team
+   default seen last is mirrored under APPEARANCE_TEAM_KEY for the same reason.
+   Palette names stay Chinese here and are translated when shown. */
+const APPEARANCE_KEY='hola-appearance', APPEARANCE_TEAM_KEY='hola-appearance-team';
+const THEMES={
+  anthropic:{name:'Anthropic风',palettes:{
+    default:{name:'原色',sw:['#F0EEE6','#FFFDF9','#1F1B15','#D97757']},
+    dusk:{name:'暮色',sw:['#1C1916','#272320','#EFE8DC','#E6916F']},
+    moss:{name:'苔绿',sw:['#EEF0E8','#FCFDF8','#1F1B15','#4F7D55']},
+    plum:{name:'紫藤',sw:['#F1EDF0','#FEFCFD','#1F1B15','#8B5E9E']},
+    slate:{name:'青灰',sw:['#ECEEF0','#FBFCFD','#1A1E24','#3F6E9E']}}},
+  tempo:{name:'Tempo风',mono:true,palettes:{
+    paper:{name:'纸墨',sw:['#F4F1EA','#F4F1EA','#221F1B','#B93C20']},
+    phosphor:{name:'磷光',sw:['#0C120E','#0C120E','#BFE8C6','#5CE07A']},
+    amber:{name:'琥珀',sw:['#141008','#141008','#F0C86E','#FFB224']}}}
+};
+const APPEARANCE_DEFAULT={theme:'anthropic',palette:'default'};
+/* Anything but a known theme is nothing; an unknown palette becomes the theme's first. */
+function normalizeAppearance(v){
+  const theme=THEMES[v?.theme]?v.theme:null;if(!theme)return null;
+  const palette=THEMES[theme].palettes[v.palette]?v.palette:Object.keys(THEMES[theme].palettes)[0];
+  return {theme,palette};
+}
+/* One's own choice is read from storage once and kept here, so it still
+   applies on this page when storage refuses to keep it. */
+let appearanceOwn;
+function appearanceOverride(){
+  if(appearanceOwn===undefined){try{appearanceOwn=normalizeAppearance(JSON.parse(localStorage.getItem(APPEARANCE_KEY)||'null'))}catch(_){appearanceOwn=null}}
+  return appearanceOwn;
+}
+function teamAppearance(){return normalizeAppearance(typeof S==='object'&&S?.appearance)||APPEARANCE_DEFAULT}
+function currentAppearance(){return appearanceOverride()||teamAppearance()}
+function sameAppearance(a,b){return Boolean(a&&b)&&a.theme===b.theme&&a.palette===b.palette}
+const appearanceName=a=>a?`${tr(THEMES[a.theme].name)} · ${tr(THEMES[a.theme].palettes[a.palette].name)}`:'';
+/* Writes the choice on <html> and lets the browser chrome and favicon follow
+   the palette; a theme change retypes the open page's title in Tempo风. */
+function applyAppearance(){
+  const next=currentAppearance(),root=typeof document==='object'?document.documentElement:null,was=root?.dataset?.theme;
+  if(!root?.dataset)return next;
+  root.dataset.theme=next.theme;root.dataset.palette=next.palette;
+  try{if(normalizeAppearance(S?.appearance))localStorage.setItem(APPEARANCE_TEAM_KEY,JSON.stringify(teamAppearance()))}catch(_){}
+  const sw=THEMES[next.theme].palettes[next.palette].sw,hex=c=>'%23'+c.slice(1).toUpperCase();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',sw[0]);
+  const icon=document.querySelector('link[rel="icon"]');
+  if(icon){if(!icon.dataset.base)icon.dataset.base=icon.getAttribute('href');icon.setAttribute('href',icon.dataset.base.replace(/%23D97757/g,hex(sw[3])).replace(/%23FFFDF9/g,hex(sw[1])))}
+  if(was!==next.theme&&next.theme==='tempo')tempoTypewriter(document.querySelector('.view.active-view .page-intro h1'));
+  return next;
+}
+function setAppearanceOverride(v){
+  const next=appearanceOwn=normalizeAppearance(v);
+  try{if(next)localStorage.setItem(APPEARANCE_KEY,JSON.stringify(next));else localStorage.removeItem(APPEARANCE_KEY)}catch(_){}
+  return applyAppearance();
+}
+/* Tempo风 types a title in: the characters step in at ≈28ms each, a whole
+   title within 400ms, with the block cursor after the last one. Only plain
+   text titles are typed; if anything else rewrites the title meanwhile the
+   typing stops and leaves that text alone. Off under reduced motion. */
+const TEMPO_TYPE_MS=28,TEMPO_TYPE_MAX=400;
+function tempoTypewriter(el){
+  if(!el||typeof document!=='object'||document.documentElement?.dataset?.theme!=='tempo'||el.children?.length)return false;
+  if(typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches)return false;
+  const text=el.textContent||'';if(!text.trim())return false;
+  const chars=[...text],step=Math.min(TEMPO_TYPE_MS,TEMPO_TYPE_MAX/chars.length),token=`${Date.now()}${Math.random()}`;
+  let i=0;el.dataset.typing=token;el.classList.add('is-typing');el.textContent='';
+  const stop=()=>{delete el.dataset.typing;el.classList.remove('is-typing')};
+  const tick=()=>{
+    if(el.dataset.typing!==token)return;
+    if(!el.isConnected||el.textContent!==chars.slice(0,i).join('')){stop();return}
+    el.textContent=chars.slice(0,++i).join('');
+    if(i<chars.length)setTimeout(tick,step);else stop();
+  };
+  setTimeout(tick,step);return true;
+}
 /* One stroked 24px icon set. Everything the UI used to draw with text glyphs
    (◷ ▦ ✦ ◇ ＋ › ↻ ▶ …) now comes from here, so stroke weight, optical size and
    alignment stay consistent and nothing depends on the system symbol font. */
@@ -118,6 +196,7 @@ const ICON_PATHS={
   'repeat':'<path d="m17 2.5 3.5 3.5L17 9.5"/><path d="M3.5 11.5v-1a4 4 0 0 1 4-4h13"/><path d="m7 21.5-3.5-3.5L7 14.5"/><path d="M20.5 12.5v1a4 4 0 0 1-4 4h-13"/>',
   'check':'<path d="M20 6.5 9.5 17 4 11.5"/>',
   'archive':'<rect x="2.5" y="3.5" width="19" height="5" rx="1"/><path d="M4.5 8.5v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-10"/><path d="M10 12.5h4"/>',
+  'palette':'<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.1 0-1 .8-1.7 1.7-1.7h2A4.6 4.6 0 0 0 21 10.7C21 6.4 16.9 3 12 3Z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7" r="1"/>',
   'settings':'<path d="M4 6.5h9"/><path d="M17 6.5h3"/><path d="M4 12h5"/><path d="M13 12h7"/><path d="M4 17.5h9"/><path d="M17 17.5h3"/><circle cx="15" cy="6.5" r="2"/><circle cx="11" cy="12" r="2"/><circle cx="15" cy="17.5" r="2"/>',
   'edit':'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4Z"/>',
   'mail':'<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 7.5 9 5.5 9-5.5"/>',
@@ -590,6 +669,7 @@ function switchView(view){
   const shown=$(`#${view}View`),seen=UI.seenViews||(UI.seenViews=new Set());
   shown?.classList?.toggle('is-revisit',seen.has(view));seen.add(view);
   $$('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));
+  if(changed)tempoTypewriter(shown?.querySelector?.('.page-intro h1'));
   if(view!=='today'&&typeof syncFilterLinks==='function')syncFilterLinks();
   const labels={today:tr('今日任务'),calendar:tr('周视图'),projects:tr('项目空间'),timeline:tr('项目时间轴'),
     achievements:tr('成果库'),archive:tr('档案室'),drafts:tr('草稿箱'),inbox:tr('收件箱'),accounts:tr('账户管理'),
@@ -2767,6 +2847,7 @@ async function saveCreationPolicy(patch={}){const p=S.creationPolicy;await api('
    恢复默认. Rows the account may not change are left out. */
 const SETTING_DEFAULTS={
   week:{modified:()=>weekStartDay()!==6,reset:()=>['week_start.update',{day:6}]},
+  theme:{modified:()=>!sameAppearance(teamAppearance(),APPEARANCE_DEFAULT),reset:()=>['appearance.update',APPEARANCE_DEFAULT]},
   stacking:{modified:()=>Boolean(S.repeatStacking),reset:()=>['repeat.stacking.update',{enabled:false}]},
   auto:{modified:()=>S.automation?.enabled===false,reset:()=>['automation.update',{enabled:true}]},
   collection:{modified:()=>(S.automation?.mode||'daily')!=='daily'||(S.automation?.time||'00:00')!=='00:00',reset:()=>['automation.update',{mode:'daily',time:'00:00'}]},
@@ -3000,6 +3081,7 @@ function renderSettings(){
   renderProjectAutomationSetting();
   renderCollectionSchedule();
   renderWeekStartSetting();
+  renderAppearanceSetting();
   renderCreationPolicy();
   renderSettingsSummaries();
   renderSettingIndicators();
@@ -3185,6 +3267,35 @@ function renderWeekStartSetting(){
     /* One change at a time: the choice shows at once and the row waits for the save. */
     box.dataset.saving='1';box.querySelectorAll('[data-day]').forEach(x=>{const on=x===b;x.classList.toggle('is-on',on);x.setAttribute('aria-checked',String(on));x.disabled=true});
     try{await act('week_start.update',{day:next},{quiet:true});flashSaved($('#weekStartCard'))}catch(e){renderWeekStartSetting()}
+    finally{delete box.dataset.saving}
+  });
+}
+/* 主题与配色: the theme as a segmented choice, its palettes as painted cards.
+   The page takes the new look at once and the row waits for the save. */
+function paletteSwatchHTML(theme,palette,cls='palette-swatch'){
+  const t=THEMES[theme],p=t.palettes[palette],[paper,surface,ink,accent]=p.sw;
+  const art=`style="--sw-paper:${paper};--sw-surface:${surface};--sw-ink:${ink};--sw-accent:${accent}"`;
+  if(cls==='palette-dot')return `<button type="button" class="palette-dot" role="radio" data-pick-theme="${theme}" data-pick-palette="${palette}" ${art} title="${escapeHTML(tr(p.name))}" aria-label="${escapeHTML(tr(p.name))}"></button>`;
+  return `<button type="button" class="${cls}${t.mono?' is-mono':''}" role="radio" data-pick-theme="${theme}" data-pick-palette="${palette}"><span class="palette-art" ${art}><i></i></span><span class="palette-name">${escapeHTML(tr(p.name))}</span></button>`;
+}
+function renderAppearanceSetting(){
+  const box=$('#appearanceCard');if(!box)return;
+  if(!S.user?.admin){box.innerHTML='';return}
+  const team=teamAppearance(),shown=box.dataset.theme&&THEMES[box.dataset.theme]?box.dataset.theme:team.theme;
+  const palettes=Object.keys(THEMES[shown].palettes);
+  box.innerHTML=`<div class="appearance-pick"><div class="rule-seg appearance-themes" role="radiogroup" aria-label="${tr('主题')}">`
+    +`${Object.entries(THEMES).map(([id,t])=>`<button type="button" class="rule-opt${id===shown?' is-on':''}" role="radio" aria-checked="${id===shown}" data-theme-tab="${id}">${escapeHTML(tr(t.name))}</button>`).join('')}</div>`
+    +`<div class="palette-grid" role="radiogroup" aria-label="${tr('配色')}">${palettes.map(p=>paletteSwatchHTML(shown,p)).join('')}</div>`
+    +`<p class="muted appearance-hint">${tr('全员默认的外观；每个人仍可在左上角账户菜单里换成自己的。')}</p></div>`;
+  box.querySelectorAll('.palette-swatch').forEach(b=>{const on=sameAppearance(team,{theme:b.dataset.pickTheme,palette:b.dataset.pickPalette});b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))});
+  /* A theme tab only shows that theme's palettes; the team's look changes once a palette is picked. */
+  box.querySelectorAll('[data-theme-tab]').forEach(b=>b.onclick=()=>{box.dataset.theme=b.dataset.themeTab;renderAppearanceSetting()});
+  box.querySelectorAll('.palette-swatch').forEach(b=>b.onclick=async()=>{
+    const next={theme:b.dataset.pickTheme,palette:b.dataset.pickPalette},before=S.appearance;
+    if(sameAppearance(team,next)||box.dataset.saving)return;
+    box.dataset.saving='1';S.appearance=next;applyAppearance();renderAppearanceSetting();
+    try{await act('appearance.update',next,{quiet:true});flashSaved($('#appearanceCard'))}
+    catch(e){S.appearance=before;applyAppearance();renderAppearanceSetting()}
     finally{delete box.dataset.saving}
   });
 }
@@ -3400,8 +3511,8 @@ function renderAccountMenu(){
   const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
-  menu.innerHTML=`${head}${mine}${languageChooserHTML('account-menu-group')}${switchGroup}${foot}`;
-  bindLanguageChooser(menu);
+  menu.innerHTML=`${head}${mine}${languageChooserHTML('account-menu-group')}${appearanceChooserHTML('account-menu-group')}${switchGroup}${foot}`;
+  bindLanguageChooser(menu);bindAppearanceChooser(menu);
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
   menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
   positionAccountMenu();
@@ -3413,6 +3524,23 @@ function languageChooserHTML(cls){
     +`<div class="language-options">${Object.entries(LANGS).map(([id,label])=>`<button type="button" class="language-option${id===LANG?' is-active':''}" data-lang="${id}" lang="${id==='en'?'en':'zh-CN'}" aria-pressed="${id===LANG}">${label}</button>`).join('')}</div></div>`;
 }
 function bindLanguageChooser(root){root.querySelectorAll('.language-option').forEach(b=>b.onclick=()=>setLanguage(b?.dataset?.lang))}
+/* 外观 sits under it: 跟随团队 or a theme of one's own, then that theme's
+   palettes as dots. The choice is this browser's and applies at once. */
+function appearanceChooserHTML(cls){
+  const own=appearanceOverride(),team=teamAppearance(),shown=own||team;
+  const opt=(id,label,on)=>`<button type="button" class="language-option${on?' is-active':''}" data-appearance="${id}" aria-pressed="${on}">${escapeHTML(label)}</button>`;
+  return `<div class="${cls} appearance-chooser" role="group" aria-label="${tr('外观')}"><span class="account-menu-label">${tr('外观')}<small>${escapeHTML(own?tr('自己的'):tr('团队默认 · {0}',appearanceName(team)))}</small></span>`
+    +`<div class="language-options">${opt('',tr('跟随团队'),!own)}${Object.entries(THEMES).map(([id,t])=>opt(id,tr(t.name),own?.theme===id)).join('')}</div>`
+    +`${own?`<div class="palette-row" role="radiogroup" aria-label="${tr('配色')}">${Object.keys(THEMES[shown.theme].palettes).map(p=>paletteSwatchHTML(shown.theme,p,'palette-dot')).join('')}</div>`:''}</div>`;
+}
+function bindAppearanceChooser(root){
+  const pick=v=>{setAppearanceOverride(v);if(root.id==='accountMenu')renderAccountMenu()};
+  root.querySelectorAll('[data-appearance]').forEach(b=>b.onclick=()=>{
+    const theme=b.dataset.appearance,own=appearanceOverride();
+    pick(theme?{theme,palette:own?.theme===theme?own.palette:teamAppearance().theme===theme?teamAppearance().palette:null}:null);
+  });
+  root.querySelectorAll('.palette-dot').forEach(b=>{b.setAttribute('aria-checked',String(sameAppearance(currentAppearance(),{theme:b.dataset.pickTheme,palette:b.dataset.pickPalette})));b.classList.toggle('is-on',b.getAttribute('aria-checked')==='true');b.onclick=()=>pick({theme:b.dataset.pickTheme,palette:b.dataset.pickPalette})});
+}
 function positionAccountMenu(){
   const menu=$('#accountMenu'),anchor=$('#workspaceSwitcher');
   if(!menu||menu.classList.contains('hidden')||!anchor?.getBoundingClientRect||typeof window==='undefined')return;
@@ -3504,7 +3632,7 @@ function openModal(html){flushFormDraft();cancelMeetingOpen();meetingStopLive().
   UI.briefTyping?.finish();UI.briefTyping=null;
   document.querySelectorAll('.brief-folder').forEach(x=>x.remove());
   ['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));
-  $('#modalContent').innerHTML=html;
+  $('#modalContent').innerHTML=html;tempoTypewriter($('#modalContent h2'));
   if($('#modalContent').dataset)delete $('#modalContent').dataset.meetingId;
   $('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop')?.classList.remove('hidden')};
 function closeModal(){if(UI.docDirty&&!confirm(tr('修改还没保存，确定关闭？')))return;flushFormDraft(true);cancelMeetingOpen();
@@ -4877,6 +5005,7 @@ function tourPlace(){
   card.style.left=`${position.x}px`;card.style.top=`${position.y}px`;
 }
 function renderAll(){
+  applyAppearance();
   if(typeof ensureAccountCreateButton==='function')ensureAccountCreateButton();
   $$('.admin-only-nav').forEach(n=>n.classList.toggle('hidden',!S.user?.admin));
   const pm=projectMode();

@@ -104,6 +104,9 @@ CHAT_TIME_SQL = "COALESCE(json_extract(data,'$.createdAt'),'')"
 # Notices the page acts on by reference; they stay in the state however old.
 ACTIONABLE_NOTICES = ('approval', 'project_completion', 'task_edit_approval', 'task_request')
 READ_NOTICES_KEPT = 200
+# 外观: the themes the page can draw and each one's palettes, first is the
+# default. The ids match data-theme / data-palette in styles.css.
+THEMES = {'anthropic': ('default', 'dusk', 'moss', 'plum', 'slate'), 'tempo': ('paper', 'phosphor', 'amber')}
 # Left out of the audit log: drafts are private scratch text saved as people
 # type, and an open chat room asks for news every few seconds, which would bury
 # every real action under its own polling.
@@ -2827,6 +2830,16 @@ class Store:
         value=json.loads(row['data']).get('value') if row else None
         return value if isinstance(value,int) and 0<=value<=6 else 6
 
+    def appearance(self):
+        """The team's theme and palette, Anthropic风 原色 until an admin picks another;
+        a value the page no longer knows falls back the same way."""
+        row=self.db.execute("SELECT data FROM settings WHERE id='appearance'").fetchone()
+        value=(json.loads(row['data']).get('value') or {}) if row else {}
+        value=value if isinstance(value,dict) else {}
+        theme=value.get('theme') if value.get('theme') in THEMES else 'anthropic'
+        palette=value.get('palette') if value.get('palette') in THEMES[theme] else THEMES[theme][0]
+        return {'theme':theme,'palette':palette}
+
     def load_window(self, p):
         """The days a project's 人力 numbers cover: its own period, or for a
         project without an end the last week and the coming one, so an
@@ -2941,6 +2954,7 @@ class Store:
                 'dateHorizon':calendar_end(at.date()).isoformat(),
                 'weekStart':self.week_start(),
                 'repeatStacking':self.repeat_stacking(),
+                'appearance':self.appearance(),
                 'projects':projects,
                 'folders':folders,
                 'fileArchives':file_archives,
@@ -4031,6 +4045,13 @@ class Store:
             self.superadmin(user)
             if not isinstance(d.get('enabled'),bool):raise Problem(400,'合并设置必须是布尔值')
             return self.put('settings',{'id':'repeat_stacking','value':d['enabled'],'updatedAt':timestamp(),'by':user['id']})
+        if action=='appearance.update':
+            # The team's theme and palette; everyone's page follows unless they
+            # chose their own in the account menu.
+            self.admin(user);theme=d.get('theme');palette=d.get('palette')
+            if not isinstance(theme,str) or not isinstance(palette,str) or theme not in THEMES or palette not in THEMES[theme]:raise Problem(400,'主题或配色无效')
+            value={'theme':theme,'palette':palette}
+            self.put('settings',{'id':'appearance','value':value,'updatedAt':timestamp(),'by':user['id']});return value
         if action=='week_start.update':
             # The team's first day of the week, 0 = 周日 … 6 = 周六 (as JavaScript
             # counts them).  Everyone's week view and 周报 follow it.
