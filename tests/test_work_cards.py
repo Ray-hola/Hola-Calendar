@@ -179,4 +179,3 @@ class AgentIssueRegressionTests(unittest.TestCase):
         self.chat(support._chat('好的'),planning=True)
         policy=json.loads(self.seen[0].data)['messages'][0]['content']
         self.assertIn('绝不能起草一张名为「删掉X」的新任务',policy)
-

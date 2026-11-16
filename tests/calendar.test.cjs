@@ -4304,3 +4304,123 @@ test('people to add to a project are listed by name, like those already on it', 
     S.projects=[{id:'p',name:'项目',owner:'chenxi',status:'active',start:'2026-11-01',members:{chenxi:'accepted'}}];inviteCollaborators('p')`);
   assert.match(page.elements['#modalContent'].innerHTML, /value="wang00"> <strong>王零<\/strong><small>wang00 · /);
 });
+
+/* 外观: a theme and a palette, the team's by default, one's own when chosen. */
+function appearanceHarness(stored = {}, theme = 'anthropic') {
+  const a = app(), writes = {}, attrs = {};
+  const el = (id) => ({href: '', _attrs: attrs, setAttribute(k, v) { attrs[`${id}.${k}`] = v; }, getAttribute(k) { return attrs[`${id}.${k}`] ?? (id === 'icon' ? 'data:x,%23D97757-%23FFFDF9' : null); }, dataset: {}});
+  const icon = el('icon'), meta = el('meta');
+  a.context.localStorage = {getItem: k => stored[k] ?? null, setItem: (k, v) => { writes[k] = v; stored[k] = v; }, removeItem: k => { delete stored[k]; writes[k] = null; }};
+  a.context.document = {documentElement: {dataset: {theme}}, querySelector: s => s.startsWith('meta') ? meta : s.startsWith('link') ? icon : null};
+  a.context.matchMedia = () => ({matches: false});
+  return {a, writes, attrs, stored};
+}
+
+test('an appearance is a known theme and one of its palettes, anything else falls back', () => {
+  const a = app();
+  assert.deepEqual(a.json("normalizeAppearance({theme:'tempo',palette:'amber'})"), {theme: 'tempo', palette: 'amber'});
+  assert.deepEqual(a.json("normalizeAppearance({theme:'tempo',palette:'dusk'})"), {theme: 'tempo', palette: 'paper'}, 'a palette of another theme becomes the first');
+  assert.equal(a.run("normalizeAppearance({theme:'neon',palette:'default'})"), null);
+  assert.equal(a.run('normalizeAppearance(null)'), null);
+  assert.equal(a.run("normalizeAppearance({theme:'constructor'})"), null);
+  assert.deepEqual(a.json("normalizeAppearance({theme:'tempo',palette:'constructor'})"), {theme: 'tempo', palette: 'paper'});
+  assert.deepEqual(a.json('APPEARANCE_DEFAULT'), {theme: 'anthropic', palette: 'default'});
+  assert.deepEqual(a.json('Object.keys(THEMES.anthropic.palettes)'), ['default', 'dusk', 'moss', 'plum', 'slate']);
+  assert.deepEqual(a.json('Object.keys(THEMES.tempo.palettes)'), ['paper', 'phosphor', 'amber']);
+  for (const [theme, palette, sw] of a.json('Object.entries(THEMES).flatMap(([t,x])=>Object.entries(x.palettes).map(([p,v])=>[t,p,v.sw]))'))
+    assert.equal(sw.length, 4, `${theme}/${palette} paints paper, surface, ink and accent`);
+});
+
+test('the page follows the team default until this browser picks its own', () => {
+  const h = appearanceHarness();
+  h.a.run("S={appearance:{theme:'anthropic',palette:'moss'}}");
+  assert.deepEqual(h.a.json('currentAppearance()'), {theme: 'anthropic', palette: 'moss'});
+  assert.deepEqual(h.a.json('applyAppearance()'), {theme: 'anthropic', palette: 'moss'});
+  assert.equal(h.a.run('document.documentElement.dataset.palette'), 'moss');
+  assert.equal(JSON.parse(h.writes['hola-appearance-team']).palette, 'moss', 'the team default is remembered for the next load');
+  assert.equal(h.attrs['meta.content'], '#EEF0E8', 'the browser chrome takes the paper colour');
+  assert.equal(h.attrs['icon.href'], 'data:x,%234F7D55-%23FCFDF8', 'the favicon takes the accent and surface');
+  h.a.run("setAppearanceOverride({theme:'tempo',palette:'phosphor'})");
+  assert.deepEqual(JSON.parse(h.writes['hola-appearance']), {theme: 'tempo', palette: 'phosphor'});
+  assert.equal(h.a.run('document.documentElement.dataset.theme'), 'tempo');
+  assert.deepEqual(h.a.json('currentAppearance()'), {theme: 'tempo', palette: 'phosphor'}, 'one’s own choice wins over the team');
+  h.a.run("S={appearance:{theme:'anthropic',palette:'default'}}");
+  assert.equal(h.a.run('currentAppearance().theme'), 'tempo', 'and keeps winning when the team changes');
+  h.a.run('setAppearanceOverride(null)');
+  assert.equal(h.writes['hola-appearance'], null);
+  assert.equal(h.a.run('applyAppearance().theme'), 'anthropic');
+  assert.equal(h.attrs['icon.href'], 'data:x,%23D97757-%23FFFDF9', 'the default palette restores the original favicon');
+});
+
+test('a broken or blocked storage leaves the team default in place', () => {
+  const h = appearanceHarness({'hola-appearance': '{nope'});
+  h.a.run('S={}');
+  assert.deepEqual(h.a.json('currentAppearance()'), {theme: 'anthropic', palette: 'default'});
+  h.a.context.localStorage = {getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); }};
+  assert.deepEqual(h.a.json("setAppearanceOverride({theme:'tempo',palette:'amber'})"), {theme: 'tempo', palette: 'amber'}, 'it still applies to this page');
+  h.a.run("S={appearance:{theme:'tempo',palette:'retired'}}");
+  assert.deepEqual(h.a.json('teamAppearance()'), {theme: 'tempo', palette: 'paper'});
+  assert.equal(h.a.run("sameAppearance({theme:'tempo',palette:'paper'},teamAppearance())"), true);
+  assert.equal(h.a.run('SETTING_DEFAULTS.theme.modified()'), true);
+  assert.deepEqual(h.a.json('SETTING_DEFAULTS.theme.reset()'), ['appearance.update', {theme: 'anthropic', palette: 'default'}]);
+});
+
+test('Tempo风 types a plain title in and stops when something else rewrites it', async () => {
+  const h = appearanceHarness({}, 'tempo');
+  const timers = [];
+  h.a.context.setTimeout = (f, ms) => { timers.push([f, ms]); return timers.length; };
+  const title = {textContent: '今天做什么？', children: [], dataset: {}, isConnected: true, classList: {list: new Set(), add(c) { this.list.add(c); }, remove(c) { this.list.delete(c); }}};
+  h.a.context.title = title;
+  assert.equal(h.a.run('tempoTypewriter(title)'), true);
+  assert.equal(title.textContent, '', 'the title starts empty');
+  assert.ok(title.classList.list.has('is-typing'), 'and carries the cursor');
+  timers[0][0]();
+  assert.equal(h.a.run('tempoTypewriter(title)'), false, 'revisiting during typing cannot truncate a title');
+  assert.ok(timers[0][1] <= 28 && timers[0][1] * 6 <= 400, 'six characters fit well inside 400ms');
+  while (timers.length < 6) timers[timers.length - 1][0]();
+  timers[5][0]();
+  assert.equal(title.textContent, '今天做什么？');
+  assert.ok(!title.classList.list.has('is-typing'), 'the cursor leaves with the last character');
+  assert.equal(timers.length, 6);
+  /* A title rewritten by a render in the middle of typing is left as rewritten. */
+  const other = {...title, textContent: '周视图', dataset: {}, classList: {list: new Set(), add(c) { this.list.add(c); }, remove(c) { this.list.delete(c); }}};
+  h.a.context.title = other; timers.length = 0;
+  h.a.run('tempoTypewriter(title)');
+  timers[0][0]();
+  other.textContent = '日期详情';
+  timers[1][0]();
+  assert.equal(other.textContent, '日期详情');
+  assert.ok(!other.classList.list.has('is-typing'));
+  /* Not in Anthropic风, not for titles with markup, not under reduced motion. */
+  h.a.run("document.documentElement.dataset.theme='anthropic'");
+  assert.equal(h.a.run('tempoTypewriter(title)'), false);
+  h.a.run("document.documentElement.dataset.theme='tempo'");
+  assert.equal(h.a.run('tempoTypewriter({textContent:"x",children:[{}],dataset:{}})'), false);
+  h.a.context.matchMedia = () => ({matches: true});
+  assert.equal(h.a.run('tempoTypewriter(title)'), false);
+  assert.equal(other.textContent, '日期详情');
+});
+
+test('the theme is set before the stylesheet loads and the setting sits in 系统设置 with its palettes drawn', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  assert.ok(html.indexOf("read('hola-appearance')") < html.indexOf('rel="stylesheet"'), 'no flash of the other theme');
+  assert.match(html, /<section class="settings-group" id="settings-appearance" data-nav="外观" data-nav-icon="palette">/);
+  assert.match(html, /data-setting="theme" data-role="admin" data-keywords="[^"]*Tempo[^"]*"/);
+  assert.match(html, /<div id="appearanceCard" class="setting-body">/);
+  assert.match(source, /'palette':'<path/, 'the group has its icon');
+  const a = app();
+  for (const [theme, palette] of a.json('Object.entries(THEMES).flatMap(([t,x])=>Object.keys(x.palettes).map(p=>[t,p]))')) {
+    if (palette === a.json(`Object.keys(THEMES.${theme}.palettes)`)[0]) continue; // the first palette is the theme block itself
+    assert.ok(css.includes(`[data-theme="${theme}"][data-palette="${palette}"]`), `styles.css draws ${theme}/${palette}`);
+  }
+  assert.match(css, /\[data-theme="tempo"\] \{[^}]*--font-sans: var\(--font-mono\)/, 'Tempo风 is monospace throughout');
+  assert.match(css, /\[data-theme="tempo"\] \.primary-btn::before[\s\S]*?content: '\[\\00a0'/, 'buttons read as [ labels ]');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\[data-theme="tempo"\][\s\S]*?animation: none;/, 'the cursor holds still under reduced motion');
+  /* The default palette is :root itself: no rule rewrites its tokens. */
+  assert.ok(!css.includes('[data-palette="default"]'));
+  const en = appIn('en');
+  for (const name of ['Anthropic风', 'Tempo风', '原色', '暮色', '苔绿', '紫藤', '青灰', '纸墨', '磷光', '琥珀', '跟随团队', '外观'])
+    assert.notEqual(en.run(`tr(${JSON.stringify(name)})`), name, `${name} has English`);
+  assert.equal(en.run("appearanceName({theme:'tempo',palette:'phosphor'})"), 'Tempo style · Phosphor');
+});
