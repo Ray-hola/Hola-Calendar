@@ -2,14 +2,16 @@
 # Builds 哗啦待办 桌面伴侣 with swiftc directly (no SwiftPM, no Xcode) and
 # assembles a signed .app bundle. Works with Command Line Tools alone.
 #
-#   scripts/build.sh            release build of everything + .app
-#   scripts/build.sh test       build and run the unit tests
-#   scripts/build.sh debug      debug build (faster, -Onone)
+#   scripts/build.sh            release build of everything + a universal .app
+#   scripts/build.sh test       build and run the unit tests (this Mac's architecture)
+#   scripts/build.sh debug      debug build (faster, -Onone, this Mac's architecture)
 #   scripts/build.sh run        build then open the app
 #
 # Environment:
 #   SDKROOT   macOS SDK to use. Defaults to the newest SDK whose Swift module
 #             matches this compiler (the CLT may ship a newer, unusable SDK).
+#   ARCHS     architectures for the release .app, default "arm64 x86_64". The
+#             other one is cross-compiled, so no Rosetta is needed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +20,10 @@ MODE="${1:-release}"
 APP_NAME="哗啦待办"
 BUNDLE_ID="cn.hola.desktop"
 MIN_OS="13.0"
-TARGET="arm64-apple-macosx$MIN_OS"
-case "$(uname -m)" in x86_64) TARGET="x86_64-apple-macosx$MIN_OS";; esac
+HOST_ARCH="$(uname -m)"
+TARGET="$HOST_ARCH-apple-macosx$MIN_OS"
+ARCHS="${ARCHS:-arm64 x86_64}"
+if [ "$MODE" = "test" ] || [ "$MODE" = "debug" ]; then ARCHS="$HOST_ARCH"; fi
 
 sdk_ok() {  # the SDK's stdlib must have been built by this exact compiler
   local probe; probe="$(mktemp -d)"; printf 'import Foundation\nlet x = Date()\n' > "$probe/p.swift"
@@ -42,35 +46,47 @@ SDK="$(pick_sdk)"
 echo "SDK: $SDK"
 
 OPT="-O"; [ "$MODE" = "debug" ] && OPT="-Onone -g"
-COMMON=(-sdk "$SDK" -target "$TARGET" -swift-version 5 $OPT -module-cache-path "$OUT/module-cache")
 
 mkdir -p "$OUT"
 cd "$ROOT"
 
-echo "→ HolaCore"
-swiftc "${COMMON[@]}" -parse-as-library -emit-library -emit-module -module-name HolaCore \
-  -emit-module-path "$OUT/HolaCore.swiftmodule" -o "$OUT/libHolaCore.dylib" \
-  -Xlinker -install_name -Xlinker @rpath/libHolaCore.dylib \
-  Sources/HolaCore/*.swift
-
-LINK_CORE=(-I "$OUT" -L "$OUT" -lHolaCore -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker "$OUT")
+# One folder per architecture. Every binary sits next to libHolaCore.dylib, so
+# @executable_path is the only search path: none points back at this machine.
+build_arch() {
+  local arch="$1" dir="$OUT/$1"
+  local common=(-sdk "$SDK" -target "$arch-apple-macosx$MIN_OS" -swift-version 5 $OPT -module-cache-path "$OUT/module-cache")
+  local link=(-I "$dir" -L "$dir" -lHolaCore -Xlinker -rpath -Xlinker @executable_path)
+  mkdir -p "$dir"
+  echo "→ HolaCore ($arch)"
+  swiftc "${common[@]}" -parse-as-library -emit-library -emit-module -module-name HolaCore \
+    -emit-module-path "$dir/HolaCore.swiftmodule" -o "$dir/libHolaCore.dylib" \
+    -Xlinker -install_name -Xlinker @rpath/libHolaCore.dylib \
+    Sources/HolaCore/*.swift
+  if [ "$MODE" = "test" ]; then
+    echo "→ HolaCoreTests ($arch)"
+    swiftc "${common[@]}" "${link[@]}" -parse-as-library -module-name HolaCoreTests \
+      -o "$dir/HolaCoreTests" Tests/HolaCoreTests/*.swift
+    return
+  fi
+  echo "→ holactl ($arch)"
+  swiftc "${common[@]}" "${link[@]}" -module-name holactl -o "$dir/holactl" Sources/holactl/main.swift
+  echo "→ HolaDesktop ($arch)"
+  swiftc "${common[@]}" "${link[@]}" -parse-as-library -module-name HolaDesktop \
+    -framework AppKit -framework SwiftUI -framework ServiceManagement \
+    -o "$dir/HolaDesktop" Sources/HolaDesktop/*.swift
+}
+for arch in $ARCHS; do build_arch "$arch"; done
 
 if [ "$MODE" = "test" ]; then
-  echo "→ HolaCoreTests"
-  swiftc "${COMMON[@]}" "${LINK_CORE[@]}" -parse-as-library -module-name HolaCoreTests \
-    -o "$OUT/HolaCoreTests" Tests/HolaCoreTests/*.swift
   echo "→ running"
-  "$OUT/HolaCoreTests"
+  "$OUT/$HOST_ARCH/HolaCoreTests"
   exit $?
 fi
 
-echo "→ holactl"
-swiftc "${COMMON[@]}" "${LINK_CORE[@]}" -module-name holactl -o "$OUT/holactl" Sources/holactl/main.swift
-
-echo "→ HolaDesktop"
-swiftc "${COMMON[@]}" "${LINK_CORE[@]}" -parse-as-library -module-name HolaDesktop \
-  -framework AppKit -framework SwiftUI -framework ServiceManagement \
-  -o "$OUT/HolaDesktop" Sources/HolaDesktop/*.swift
+echo "→ lipo ($ARCHS)"
+for bin in libHolaCore.dylib holactl HolaDesktop; do
+  lipo -create $(for arch in $ARCHS; do echo "$OUT/$arch/$bin"; done) -output "$OUT/$bin"
+done
 
 APP="$OUT/$APP_NAME.app"
 echo "→ $APP"
