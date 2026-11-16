@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo/icon-bang.svg" alt="Hola! logo: an exclamation mark whose dot is a checked to-do" width="96"></p>
+<p align="center"><img src="assets/logo/icon-sweep.svg" alt="Hola! logo: three to-do cards swept into one checked card" width="96"></p>
 
 # Hola-Calendar
 

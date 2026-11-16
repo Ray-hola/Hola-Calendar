@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hola!">
-  <!-- small sizes: the same bang, the tick left out so it stays crisp at 16–32px -->
+  <!-- small sizes: one card behind instead of two, and a heavier tick, so it stays crisp at 16–32px -->
   <rect width="64" height="64" rx="15" fill="#D97757"/>
-  <path d="M25 9 H39 L36 39 H28 Z" fill="#FFFDF9" stroke="#FFFDF9" stroke-width="3" stroke-linejoin="round"/>
-  <rect x="24" y="43" width="16" height="16" rx="4" fill="#FFFDF9"/>
+  <g transform="translate(32 33) scale(.5) translate(-66 -57)">
+    <rect x="26" y="30" width="78" height="54" rx="11" fill="#FFFDF9" opacity="0.5" transform="rotate(-14 65 57)"/>
+    <rect x="30" y="30" width="78" height="54" rx="11" fill="#FFFDF9"/>
+    <path d="M52 57 L63 68 L85 45" fill="none" stroke="#D97757" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

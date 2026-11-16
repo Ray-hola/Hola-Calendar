@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Hola! app icon">
+  <!-- the sweep mark in paper on the accent: three cards swept into one checked card -->
+  <rect width="512" height="512" rx="116" fill="#D97757"/>
+  <g transform="translate(256 262) scale(3.3) translate(-66 -57)">
+    <rect x="22" y="30" width="78" height="54" rx="11" fill="#FFFDF9" opacity="0.3" transform="rotate(-20 61 57)"/>
+    <rect x="26" y="30" width="78" height="54" rx="11" fill="#FFFDF9" opacity="0.58" transform="rotate(-10 65 57)"/>
+    <rect x="30" y="30" width="78" height="54" rx="11" fill="#FFFDF9"/>
+    <path d="M53 57 L63 67 L84 45" fill="none" stroke="#D97757" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
