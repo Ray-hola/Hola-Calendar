@@ -111,8 +111,9 @@ const THEMES={
 const APPEARANCE_DEFAULT={theme:'anthropic',palette:'default'};
 /* Anything but a known theme is nothing; an unknown palette becomes the theme's first. */
 function normalizeAppearance(v){
-  const theme=THEMES[v?.theme]?v.theme:null;if(!theme)return null;
-  const palette=THEMES[theme].palettes[v.palette]?v.palette:Object.keys(THEMES[theme].palettes)[0];
+  if(typeof v?.theme!=='string'||!Object.hasOwn(THEMES,v.theme))return null;
+  const theme=v.theme,palettes=THEMES[theme].palettes;
+  const palette=typeof v.palette==='string'&&Object.hasOwn(palettes,v.palette)?v.palette:Object.keys(palettes)[0];
   return {theme,palette};
 }
 /* One's own choice is read from storage once and kept here, so it still
@@ -151,7 +152,7 @@ function setAppearanceOverride(v){
    typing stops and leaves that text alone. Off under reduced motion. */
 const TEMPO_TYPE_MS=28,TEMPO_TYPE_MAX=400;
 function tempoTypewriter(el){
-  if(!el||typeof document!=='object'||document.documentElement?.dataset?.theme!=='tempo'||el.children?.length)return false;
+  if(!el||typeof document!=='object'||document.documentElement?.dataset?.theme!=='tempo'||el.children?.length||el.dataset.typing)return false;
   if(typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches)return false;
   const text=el.textContent||'';if(!text.trim())return false;
   const chars=[...text],step=Math.min(TEMPO_TYPE_MS,TEMPO_TYPE_MAX/chars.length),token=`${Date.now()}${Math.random()}`;
@@ -160,6 +161,9 @@ function tempoTypewriter(el){
   const tick=()=>{
     if(el.dataset.typing!==token)return;
     if(!el.isConnected||el.textContent!==chars.slice(0,i).join('')){stop();return}
+    if(document.documentElement.dataset.theme!=='tempo'||typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches){
+      el.textContent=text;stop();return;
+    }
     el.textContent=chars.slice(0,++i).join('');
     if(i<chars.length)setTimeout(tick,step);else stop();
   };
@@ -3291,12 +3295,16 @@ function renderAppearanceSetting(){
   /* A theme tab only shows that theme's palettes; the team's look changes once a palette is picked. */
   box.querySelectorAll('[data-theme-tab]').forEach(b=>b.onclick=()=>{box.dataset.theme=b.dataset.themeTab;renderAppearanceSetting()});
   box.querySelectorAll('.palette-swatch').forEach(b=>b.onclick=async()=>{
-    const next={theme:b.dataset.pickTheme,palette:b.dataset.pickPalette},before=S.appearance;
-    if(sameAppearance(team,next)||box.dataset.saving)return;
-    box.dataset.saving='1';S.appearance=next;applyAppearance();renderAppearanceSetting();
-    try{await act('appearance.update',next,{quiet:true});flashSaved($('#appearanceCard'))}
-    catch(e){S.appearance=before;applyAppearance();renderAppearanceSetting()}
-    finally{delete box.dataset.saving}
+    const next={theme:b.dataset.pickTheme,palette:b.dataset.pickPalette},owner=S.user?.id;
+    if(sameAppearance(teamAppearance(),next)||box.dataset.saving)return;
+    box.dataset.saving='1';box.setAttribute('aria-busy','true');
+    try{
+      const saved=await api('/api/action',{action:'appearance.update',data:next});
+      if(S.user?.id!==owner)return;
+      S.appearance=saved;applyAppearance();renderAppearanceSetting();renderSettingIndicators();flashSaved(box);
+      if(UI.view==='settings')box.querySelector(`[data-pick-theme="${next.theme}"][data-pick-palette="${next.palette}"]`)?.focus();
+    }catch(e){if(S.user?.id===owner)toast(e.message)}
+    finally{delete box.dataset.saving;box.removeAttribute('aria-busy')}
   });
 }
 /* Groups that exist read as a list, one row each; a group is made or changed

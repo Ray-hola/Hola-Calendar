@@ -57,8 +57,9 @@ class AppearanceTests(unittest.TestCase):
         self.assertEqual(self.store.appearance(), {'theme': 'tempo', 'palette': 'paper'}, 'the theme keeps its first palette')
         self.store.put('settings', {'id': 'appearance', 'value': {'theme': 'retired', 'palette': 'paper'}})
         self.assertEqual(self.store.appearance(), {'theme': 'anthropic', 'palette': 'default'})
-        self.store.put('settings', {'id': 'appearance', 'value': 'tempo'})
-        self.assertEqual(self.store.appearance(), {'theme': 'anthropic', 'palette': 'default'})
+        for invalid in ('tempo', {'theme': ['tempo'], 'palette': 'amber'}):
+            self.store.put('settings', {'id': 'appearance', 'value': invalid})
+            self.assertEqual(self.store.appearance(), {'theme': 'anthropic', 'palette': 'default'})
 
     def test_the_stylesheet_and_page_know_every_palette(self):
         root = Path(__file__).resolve().parent.parent

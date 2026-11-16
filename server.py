@@ -2836,8 +2836,12 @@ class Store:
         row=self.db.execute("SELECT data FROM settings WHERE id='appearance'").fetchone()
         value=(json.loads(row['data']).get('value') or {}) if row else {}
         value=value if isinstance(value,dict) else {}
-        theme=value.get('theme') if value.get('theme') in THEMES else 'anthropic'
-        palette=value.get('palette') if value.get('palette') in THEMES[theme] else THEMES[theme][0]
+        theme=value.get('theme')
+        if not isinstance(theme,str) or theme not in THEMES:
+            theme='anthropic'
+        palette=value.get('palette')
+        if palette not in THEMES[theme]:
+            palette=THEMES[theme][0]
         return {'theme':theme,'palette':palette}
 
     def load_window(self, p):

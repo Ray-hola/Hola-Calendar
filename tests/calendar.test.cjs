@@ -4302,6 +4302,8 @@ test('an appearance is a known theme and one of its palettes, anything else fall
   assert.deepEqual(a.json("normalizeAppearance({theme:'tempo',palette:'dusk'})"), {theme: 'tempo', palette: 'paper'}, 'a palette of another theme becomes the first');
   assert.equal(a.run("normalizeAppearance({theme:'neon',palette:'default'})"), null);
   assert.equal(a.run('normalizeAppearance(null)'), null);
+  assert.equal(a.run("normalizeAppearance({theme:'constructor'})"), null);
+  assert.deepEqual(a.json("normalizeAppearance({theme:'tempo',palette:'constructor'})"), {theme: 'tempo', palette: 'paper'});
   assert.deepEqual(a.json('APPEARANCE_DEFAULT'), {theme: 'anthropic', palette: 'default'});
   assert.deepEqual(a.json('Object.keys(THEMES.anthropic.palettes)'), ['default', 'dusk', 'moss', 'plum', 'slate']);
   assert.deepEqual(a.json('Object.keys(THEMES.tempo.palettes)'), ['paper', 'phosphor', 'amber']);
@@ -4352,6 +4354,8 @@ test('Tempo风 types a plain title in and stops when something else rewrites it'
   assert.equal(h.a.run('tempoTypewriter(title)'), true);
   assert.equal(title.textContent, '', 'the title starts empty');
   assert.ok(title.classList.list.has('is-typing'), 'and carries the cursor');
+  timers[0][0]();
+  assert.equal(h.a.run('tempoTypewriter(title)'), false, 'revisiting during typing cannot truncate a title');
   assert.ok(timers[0][1] <= 28 && timers[0][1] * 6 <= 400, 'six characters fit well inside 400ms');
   while (timers.length < 6) timers[timers.length - 1][0]();
   timers[5][0]();
@@ -4380,7 +4384,7 @@ test('Tempo风 types a plain title in and stops when something else rewrites it'
 test('the theme is set before the stylesheet loads and the setting sits in 系统设置 with its palettes drawn', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
-  assert.ok(html.indexOf("localStorage.getItem('hola-appearance')") < html.indexOf('rel="stylesheet"'), 'no flash of the other theme');
+  assert.ok(html.indexOf("read('hola-appearance')") < html.indexOf('rel="stylesheet"'), 'no flash of the other theme');
   assert.match(html, /<section class="settings-group" id="settings-appearance" data-nav="外观" data-nav-icon="palette">/);
   assert.match(html, /data-setting="theme" data-role="admin" data-keywords="[^"]*Tempo[^"]*"/);
   assert.match(html, /<div id="appearanceCard" class="setting-body">/);
