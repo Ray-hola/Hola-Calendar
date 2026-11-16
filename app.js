@@ -6313,18 +6313,25 @@ function agentTogglePlan(){
    about the work ("哪些", "多少"…) are left alone. */
 const AGENT_MANAGE_VERB=/(删除|删掉|删了|删去|清掉|清空|移除|去掉|新建|创建|建一?个|加一?个|添加|帮我安排|安排一?个|指派给?|分配给|改到|改成|修改|挪到|推迟|延期|提前到|\b(create|add|delete|remove|assign|reschedule)\b)/i;
 const AGENT_ASK_ONLY=/(哪些|什么|多少|几个|几项|有没有|是否|怎么样|\b(what|which|how many|show me|list)\b)/i;
-function agentManageIntent(text){const t=String(text||'');return AGENT_MANAGE_VERB.test(t)&&!AGENT_ASK_ONLY.test(t)}
+function agentManageIntent(text){
+  const t=String(text||'').trim();
+  const query=/^(?:(?:请|帮我)\s*)?(?:查(?:看|询)?|看看|列出|告诉|统计|问问|说说)|^(?:please\s+)?(?:show|list|tell|check)\b/i;
+  if(query.test(t)||!AGENT_MANAGE_VERB.test(t))return false;
+  return !AGENT_ASK_ONLY.test(t)||/^(请|帮我|把|please\b)/i.test(t);
+}
 function agentOfferManage(text){
   const list=$('#agentMessages');if(!list)return false;
-  list.querySelector('.agent-intent')?.remove();
-  const el=document.createElement('div');el.className='agent-message assistant agent-intent';el.setAttribute('role','group');
+  list.querySelector('.agent-manage-offer')?.remove();
+  const owner=S.user?.id,thread=agentState.conversationId;
+  const el=document.createElement('div');el.className='agent-message assistant agent-manage-offer';el.setAttribute('role','group');
   el.innerHTML=`<p>${tr('这像是要管理任务或项目。打开「管理任务 / 项目」，助手会先查出要改的那些，再起草卡片给你确认。')}</p>`
     +`<div class="agent-intent-actions"><button type="button" class="primary-btn" data-intent="manage">${tr('打开并继续')}</button><button type="button" class="ghost-btn" data-intent="ask">${tr('只是问问')}</button></div>`;
   el.addEventListener('click',e=>{
-    const b=e.target.closest('[data-intent]');if(!b)return;el.remove();
-    const input=$('#agentInput');
-    if(b.dataset.intent==='manage'){agentState.plan=true;agentSyncPlanButton();agentPlanSubmit(text)}
-    else{if(input)input.value=text;agentSubmit(true)}
+    const b=e.target.closest('[data-intent]');
+    if(!b||!el.isConnected||owner!==S.user?.id||thread!==agentState.conversationId||agentState.busy||agentWriteBlocked())return;
+    el.remove();
+    if(b.dataset.intent==='manage'){agentState.plan=true;agentSyncPlanButton();agentPlanSubmit(text,true)}
+    else agentSubmit(true,text);
   });
   list.appendChild(el);list.scrollTop=list.scrollHeight;el.querySelector('button')?.focus();
   return true;
@@ -6677,9 +6684,9 @@ async function agentLoop(context){
     agentAppend('assistant',tr('连续 {0} 步没有通过校验，先停在这里。可以补充必要信息，或手动处理后让我接着做。',agentState.failures),'error');
   return steps;
 }
-async function agentSubmit(asking=false){
+async function agentSubmit(asking=false,offeredText){
   const owner=S.user?.id,thread=agentState.conversationId;
-  const input=$('#agentInput'),text=input?.value.trim();if(!text||agentWriteBlocked())return;
+  const input=$('#agentInput'),text=offeredText??input?.value.trim();if(!input||!text||agentWriteBlocked())return;
   /* Dropping this on the floor is what made a stuck run look like it was
      eating messages: the text stayed in the box and nothing happened. */
   if(agentState.busy){
@@ -6690,11 +6697,12 @@ async function agentSubmit(asking=false){
   if(agentServerConfig&& !agentServerConfig.configured){agentOfferSetup();return}
   const intent=agentPlanIntent(text);
   /* The 规划任务 switch, or a typed mark, turns this message into a draft. */
-  if(intent.plan||agentState.plan){input.value='';return agentPlanSubmit(intent.body)}
+  if(!asking&&(intent.plan||agentState.plan))return agentPlanSubmit(intent.body);
   if(!asking&&agentManageIntent(text)&&agentOfferManage(text)){input.value='';return}
   if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  $('#agentMessages')?.querySelector('.agent-manage-offer')?.remove();
   agentState.runGoal=text;agentSetPane('chat');
-  agentPrepareMessage(text);input.value='';const asked=agentAppend('user',text);
+  agentPrepareMessage(text);if(offeredText===undefined)input.value='';const asked=agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.paused=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
@@ -6716,11 +6724,11 @@ async function agentSubmit(asking=false){
    like and pressed confirm; each card is then made through the same actions as
    the normal dialogs, under the user's own rules, so this works whatever the
    assistant itself is allowed to do. */
-async function agentPlanSubmit(body){
+async function agentPlanSubmit(body,preserveInput=false){
   const owner=S.user?.id,thread=agentState.conversationId;
   if(agentWriteBlocked())return;
-  const input=$('#agentInput');
-  if(agentServerConfig&&!agentServerConfig.configured){if(body!==undefined&&input)input.value=body;agentOfferSetup();return}
+  const input=$('#agentInput');if(!input)return;
+  if(agentServerConfig&&!agentServerConfig.configured){if(body!==undefined&&input&&(!preserveInput||!input.value))input.value=body;agentOfferSetup();return}
   const source=body===undefined?(input?.value||''):body;
   const text=agentPlanIntent(source).body.trim();
   if(!text){toast(tr('先在输入框里写下你的安排'));return}
@@ -6730,8 +6738,9 @@ async function agentPlanSubmit(body){
     return;
   }
   if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  $('#agentMessages')?.querySelector('.agent-manage-offer')?.remove();
   agentState.runGoal=text;
-  agentPrepareMessage(text,true);input.value='';agentSyncPlanButton();
+  agentPrepareMessage(text,true);if(!preserveInput)input.value='';agentSyncPlanButton();
   agentAppend('user',AGENT_PLAN_MARK+' '+text,'','plan');
   agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();
   const wait=agentAppend('assistant',tr('正在起草卡片…'),'agent-drafting');
@@ -6743,13 +6752,13 @@ async function agentPlanSubmit(body){
     wait?.remove();
     const draft=agentSplitPlan(answer);
     if(!draft.projects.length&&!draft.tasks.length){
-      agentAppend('assistant',draft.clean||tr('没有生成可用卡片。请补充目标或稍后重试，原请求已保留。'),'error');input.value=text;return;
+      agentAppend('assistant',draft.clean||tr('没有生成可用卡片。请补充目标或稍后重试，原请求已保留。'),'error');if(!input.value)input.value=text;return;
     }
     agentPlanBoard(draft);
   }catch(e){
     wait?.remove();
     if(e.name!=='AbortError'){
-      input.value=text;agentSetPane('chat');
+      if(!input.value)input.value=text;agentSetPane('chat');
       agentAppend('assistant',e?.message||tr('暂时无法连接 Agent 服务。'),'error');
     }
   }finally{
