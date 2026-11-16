@@ -13,7 +13,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             pomodoroSection
-            if state.signedIn { taskSection } else { signInSection }
+            if state.connectScreen { connectSection } else if state.signedIn { taskSection } else { signInSection }
             footer
         }
         .padding(14)
@@ -74,6 +74,7 @@ struct PopoverView: View {
                 if let u = state.user {
                     Text(theme.isTempo ? "@\(u.name)" : u.name).font(theme.small).foregroundStyle(theme.muted)
                 }
+                serverMenu
                 Spacer()
                 statusLine
             }
@@ -153,12 +154,88 @@ struct PopoverView: View {
         }
     }
 
+    // MARK: Servers
+
+    /// The current server's host; opens the remembered list and 连接新服务器.
+    private var serverMenu: some View {
+        Menu {
+            ForEach(state.servers) { s in
+                Button((s.url == state.account ? "✓ " : "") + "\(s.name) · \(s.host)") { state.switchTo(s) }
+            }
+            Divider()
+            Button("连接新服务器…") { state.showConnectScreen() }
+            if let current = state.servers.first(where: { $0.url == state.account }) {
+                Button("忘记 \(current.host)") { state.forget(current) }
+            }
+        } label: {
+            Text(theme.isTempo ? "[\(state.server?.host ?? "")]" : "· \(state.server?.host ?? "")")
+                .font(theme.small).foregroundStyle(theme.muted)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("切换服务器")
+    }
+
+    private var connectSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(theme.heading("连接服务器")).font(theme.isTempo ? theme.title : .system(size: 13, weight: .semibold, design: .serif))
+            Text("填你们团队哗啦待办的网址。在网页版点头像 →「连接桌面 App」可以自动填好。")
+                .font(theme.small).foregroundStyle(theme.muted).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("", text: $state.serverText, prompt: Text("work.example.com 或 192.168.1.8:4173"))
+                    .textFieldStyle(.plain).font(theme.body).autocorrectionDisabled()
+                    .padding(6).background(fieldBackground)
+                    .onSubmit { connect() }
+                Button(theme.bracket(state.connecting ? "连接中…" : "连接")) { connect() }
+                    .buttonStyle(ThemedButtonStyle(theme: theme, primary: true))
+                    .disabled(state.connecting || state.serverText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if let n = state.notice {
+                Text(theme.isTempo ? "> \(n)" : n).font(theme.small).foregroundStyle(theme.accent)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            }
+            if !state.servers.isEmpty {
+                Text(theme.isTempo ? "-- 用过的服务器 --" : "用过的服务器").font(theme.small).foregroundStyle(theme.muted).padding(.top, 2)
+                ForEach(state.servers) { s in
+                    HStack(spacing: 6) {
+                        Button { state.switchTo(s) } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(s.host)
+                                Text(s.username.isEmpty ? s.name : "\(s.name) · \(s.username)").font(theme.small).foregroundStyle(theme.muted)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Button(theme.isTempo ? "[x]" : "移除") { state.forget(s) }
+                            .buttonStyle(.plain).font(theme.small).foregroundStyle(theme.muted)
+                            .help("忘记这台服务器和它的登录状态")
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            if state.server != nil {
+                Button(theme.bracket("取消")) { state.cancelConnect() }.buttonStyle(ThemedButtonStyle(theme: theme))
+            }
+        }
+    }
+
+    private func connect() { Concurrency.Task { await state.connect() } }
+
     // MARK: Sign in
 
     private var signInSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(theme.heading("登录工作台")).font(theme.isTempo ? theme.title : .system(size: 13, weight: .semibold, design: .serif))
-            field("服务器地址", text: $state.serverText, prompt: "http://192.168.1.8:4173")
+            HStack {
+                Text(theme.isTempo ? "服务器:" : "服务器").font(theme.small).foregroundStyle(theme.muted).frame(width: 64, alignment: .leading)
+                Text(state.server?.host ?? "").lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Button(theme.isTempo ? "[更换]" : "更换") { state.showConnectScreen() }
+                    .buttonStyle(.plain).font(theme.small).foregroundStyle(theme.accent)
+            }
+            if state.server?.exposesPassword == true {
+                Text("这台服务器没有用 https，密码会以明文在网上传输。请让管理员开启 https。")
+                    .font(theme.small).foregroundStyle(theme.accent).fixedSize(horizontal: false, vertical: true)
+            }
             field("账户", text: $state.username, prompt: "用户名")
             HStack {
                 Text(theme.isTempo ? "密码:" : "密码").font(theme.small).foregroundStyle(theme.muted).frame(width: 64, alignment: .leading)

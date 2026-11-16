@@ -41,11 +41,16 @@ scripts/integration-test.sh # 端到端：临时起 server.py，登录、列今�
 
 ## 登录与同步
 
-1. 点菜单栏的「三张卡」图标，填服务器地址（如 `http://192.168.1.8:4173`，不写协议默认 http）、账户、密码，回车。
-2. 应用调用网页同一个 `POST /api/login`，拿到 `wc_session` 后**只存进系统钥匙串**（不写文件、不留 Cookie）。
-3. 之后每 45 秒拉一次 `/api/state`，筛出今天、属于你的任务（规则与网页小组件一致）；打开弹窗若超过 10 秒未同步会立刻刷新；合盖休眠时停表，唤醒立刻同步。
-4. 勾一项 = 网页小组件同样的 `task.complete`（总结「完成任务」、实际用时取计划时长、感受「顺利」）。服务器拒绝（别人的任务、管理员账号、已记录过）时勾会弹回，原文显示服务器的说明。
-5. 服务器连不上时保留上次列表，顶部显示「离线 · 上次同步 HH:mm」；401 视作会话失效，清钥匙串回到登录页。
+应用不绑定任何一台服务器：每个团队连自己部署的哗啦待办。
+
+1. **连接**：点菜单栏的「三张卡」图标，填你们的网址（如 `work.example.com` 或 `192.168.1.8:4173`），点「连接」。应用先问服务器 `GET /api/info`，确认是哗啦待办、API 版本兼容，才进入登录。没写协议时，公网地址先试 https，局域网地址先试 http。连不上、不是哗啦待办、服务器比 App 新，各有明确的提示。比 `/api/info` 更早的服务器，用 `/api/health` 识别。
+   - 也可以在网页版点头像 →「连接桌面 App」→「在桌面 App 中打开」。网页会通过 `hola://connect?server=…` 把自己的地址交给 App。链接只负责填好地址，仍要你确认后点「连接」、自己输入密码。
+2. **登录**：登录页上方显示当前服务器，旁边有「更换」。如果服务器只开了 http 且不在局域网内，会提示密码会明文传输。
+3. **切换服务器**：连过的服务器会被记住（最多 8 台）。在今日列表上方点服务器名，一键切换，不用退出其他服务器，各自的登录状态分别存在钥匙串里。「移除」会同时忘掉这台服务器的登录状态。
+4. 应用调用网页同一个 `POST /api/login`，拿到 `wc_session` 后**只存进系统钥匙串**（不写文件、不留 Cookie）。
+5. 之后每 45 秒拉一次 `/api/state`，筛出今天、属于你的任务（规则与网页小组件一致）；打开弹窗若超过 10 秒未同步会立刻刷新；合盖休眠时停表，唤醒立刻同步。
+6. 勾一项 = 网页小组件同样的 `task.complete`（总结「完成任务」、实际用时取计划时长、感受「顺利」）。服务器拒绝（别人的任务、管理员账号、已记录过）时勾会弹回，原文显示服务器的说明。
+7. 服务器连不上时保留上次列表，顶部显示「离线 · 上次同步 HH:mm」；401 视作会话失效，清钥匙串回到登录页。
 
 ## 番茄钟
 
@@ -100,6 +105,6 @@ scripts/build.sh test     # unit tests
 scripts/integration-test.sh   # spins up a throwaway server.py and exercises login/list/complete/refusals
 ```
 
-**Sign in**: click the menu-bar icon, enter the server URL (e.g. `http://192.168.1.8:4173`), account and password. The `wc_session` token goes to the Keychain only. Polling every 45 s, paused during sleep; offline keeps the last list; 401 signs out.
+**Connect, then sign in**: the app is not tied to any server. Click the menu-bar icon, type your team's address (e.g. `work.example.com`) and press 连接: the app checks `GET /api/info` (falling back to `/api/health` on older servers), trying https first for public hosts and http first on the LAN, then asks for account and password. The web app's account menu has 「连接桌面 App」, which hands its own address over as `hola://connect?server=…`; the link only fills the address in. Servers you have used are remembered (up to 8) and switch in one click, each with its own session in the Keychain. The `wc_session` token goes to the Keychain only. Polling every 45 s, paused during sleep; offline keeps the last list; 401 signs out.
 
 **Launch at login**: the checkbox in the popover footer (works once the app runs from a `.app` bundle, ideally in /Applications).

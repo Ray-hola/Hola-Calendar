@@ -3519,7 +3519,7 @@ function renderAccountMenu(){
   const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
-  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
+  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${row('desktop',tr('连接桌面 App'),tr('macOS'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
   menu.innerHTML=`${head}${mine}${languageChooserHTML('account-menu-group')}${appearanceChooserHTML('account-menu-group')}${switchGroup}${foot}`;
@@ -3576,9 +3576,26 @@ function accountMenuAction(action){
   toggleAccountMenu(false);
   if(action==='profile')editProfile(S.user.id,'self');
   else if(action==='password')changeOwnPassword();
+  else if(action==='desktop')connectDesktopApp();
   else if(action==='accounts')switchView('accounts');
   else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
+}
+/* 连接桌面 App: the macOS app connects to whatever server it is given, and
+   this page knows its own address, so it hands that over as a hola:// link.
+   The app only fills the address in; the person confirms and signs in there. */
+const DESKTOP_RELEASES='https://github.com/Ray-hola/Hola-Calendar/releases';
+const desktopConnectLink=origin=>`hola://connect?server=${encodeURIComponent(origin)}`;
+function connectDesktopApp(){
+  const origin=location.origin;
+  openModal(`<div class="eyebrow">${tr('桌面 App')}</div><h2>${tr('连接桌面 App')}</h2>`
+    +`<p class="muted">${tr('在 Mac 上装好哗啦待办桌面 App 后，点「在桌面 App 中打开」，它会填好这台服务器的地址，确认后登录即可。')}</p>`
+    +`<label class="form-field">${tr('服务器地址')}<input id="desktopServer" readonly value="${escapeHTML(origin)}"></label>`
+    +`<div class="modal-footer"><a class="secondary-btn" href="${DESKTOP_RELEASES}" target="_blank" rel="noopener">${tr('下载 macOS App')}</a>`
+    +`<button class="secondary-btn" id="copyDesktopServer">${tr('复制地址')}</button>`
+    +`<a class="primary-btn" id="openDesktopApp" href="${escapeHTML(desktopConnectLink(origin))}">${tr('在桌面 App 中打开')}</a></div>`);
+  $('#desktopServer').onfocus=e=>e.target.select();
+  $('#copyDesktopServer').onclick=()=>navigator.clipboard.writeText(origin).then(()=>toast(tr('地址已复制')),()=>{$('#desktopServer').select();toast(tr('请手动复制地址'))});
 }
 /* Passwords are typed into masked boxes, the new one twice: a slip nobody
    could see would otherwise only show at the next sign-in. */
