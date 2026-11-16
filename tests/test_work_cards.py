@@ -179,3 +179,93 @@ class AgentIssueRegressionTests(unittest.TestCase):
         self.chat(support._chat('好的'),planning=True)
         policy=json.loads(self.seen[0].data)['messages'][0]['content']
         self.assertIn('绝不能起草一张名为「删掉X」的新任务',policy)
+
+    def test_delete_intent_retries_native_create_and_only_saves_the_correct_delete(self):
+        target = self.task('可删除的临时任务', creator='mate')
+        self.store.db.commit()
+        phrases = ('帮我把某人的临时任务都删掉', '帮我删掉某人的临时任务', '帮我把今天的临时任务删一下')
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                answers = iter([
+                    support.calls(support.tool('work_cards', {'tasks': [{'name': phrase}]})),
+                    support.calls(support.tool('workspace_query', {'sql': 'SELECT id FROM tasks WHERE id=?',
+                                                                  'params': [target['id']]})),
+                    support.calls(support.tool('work_cards', {'tasks': [{'operation': 'delete', 'id': target['id']}]})),
+                ])
+                result = self.chat(lambda _: next(answers), planning=True, messages=[{'role': 'user', 'content': phrase}])
+                draft = json.loads(result['content'].split('<plan>')[1].split('</plan>')[0])
+                self.assertEqual([(t['operation'], t['id']) for t in draft['tasks']], [('delete', target['id'])])
+                self.assertFalse(result['tools'][0]['ok'])
+        self.assertEqual(self.store.get('tasks', target['id'])['name'], target['name'])
+        self.assertTrue(all(t['operation'] == 'delete' for saved in self.store.all('agent_drafts') for t in saved['raw']['tasks']))
+
+    def test_delete_intent_rejects_every_text_card_format_without_saving_a_draft(self):
+        plan = json.dumps({'tasks': [{'operation': 'create', 'name': '错误的新任务'}]})
+        responses = [f'<plan>{plan}</plan>', f'<plan>{{"tasks":[]}}</plan><plan>{plan}</plan>', f'<PLAN>{plan}</PLAN>', plan, f'```json\n{plan}\n```',
+                     '<action>{"action":"task.create","data":{"name":"错误的新任务"}}</action>']
+        for response in responses:
+            with self.subTest(response=response):
+                result = self.chat(support._chat(response), messages=[{'role': 'user', 'content': '把今天的临时任务全删了'}])
+                self.assertNotIn('错误的新任务', result['content'])
+                self.assertNotIn('<plan>', result['content'].lower())
+                self.assertNotIn('<action>', result['content'])
+                self.assertTrue(result['incomplete'])
+        self.assertEqual(self.store.all('agent_drafts'), [])
+
+    def test_unknown_tool_is_unavailable_and_false_workspace_claim_is_replaced(self):
+        for tool_name, available in (('workspace_query', True), ('not_a_tool', False)):
+            with self.subTest(tool=tool_name):
+                self.seen.clear()
+                answers = iter([support.calls(support.tool(tool_name, {'sql': 'SELECT nope FROM tasks'})),
+                                support._chat('查询工具当前不可用，因此我不能确认范围。')])
+                result = self.chat(lambda _: next(answers))
+                feedback = json.loads(json.loads(self.seen[1].data)['messages'][-1]['content'])
+                self.assertIs(feedback['toolAvailable'], available)
+                self.assertNotIn('当前不可用', result['content'])
+                self.assertTrue(result['incomplete'])
+
+    def test_hundred_long_named_delete_cards_survive_history_and_next_turn(self):
+        ids = [self.task('多语言标题示例' * 23 + str(i))['id'] for i in range(100)]
+        self.store.db.commit()
+        args = {'tasks': [{'operation': 'delete', 'id': id_} for id_ in ids]}
+        session = {'sessionId': 'large-delete-fixture'}
+        result = self.chat(support.calls(support.tool('work_cards', args)), planning=True, **session)
+        draft = json.loads(result['content'].split('<plan>')[1].split('</plan>')[0])
+        self.assertEqual([card['id'] for card in draft['tasks']], ids)
+        history = self.store.agent_history(self.admin, {'conversationId': session['sessionId']})['messages']
+        self.assertEqual(history[-1]['content'], result['content'])
+        self.assertEqual(self.store.get_agent_draft(self.admin, {'draftId': draft['draftId']})['raw'], draft)
+        self.chat(support._chat('完成后可再核对'), **session, messages=[
+            {'role': 'assistant', 'content': result['content']}, {'role': 'user', 'content': '下一步怎么做？'}])
+        request = json.loads(self.seen[-1].data)
+        self.assertIn('已起草管理卡片', request['messages'][-2]['content'])
+        self.assertNotIn('<plan>', request['messages'][-2]['content'])
+
+    def test_rejected_task_cannot_be_deleted_directly_or_from_a_card(self):
+        target = self.task('已驳回的临时任务', creator='mate', status='rejected')
+        self.store.db.commit()
+        card = self.preview('task', 'delete', user=self.member, id=target['id'])
+        requests = [('task.delete', {'id': target['id'], 'confirm': target['name']}),
+                    ('work.card.apply', {**card, 'kind': 'task', 'confirmed': True, 'confirm': target['name']})]
+        for action, data in requests:
+            with self.subTest(action=action), self.assertRaises(Problem) as error:
+                self.store.action(self.member, action, data)
+            self.assertEqual(error.exception.status, 409)
+        self.assertEqual(self.store.get('tasks', target['id'])['status'], 'rejected')
+
+    def test_explicit_mixed_commands_and_creation_titles_still_work(self):
+        target = self.task('旧的临时任务', creator='mate')
+        self.store.db.commit()
+        cards = {'tasks': [{'operation': 'delete', 'id': target['id']},
+                           {'operation': 'create', 'name': '新的临时任务'}]}
+        for text in ('把旧的临时任务删掉，再创建新任务', 'Delete the old task and create a new task'):
+            result = self.chat(support.calls(support.tool('work_cards', cards)),
+                               planning=True, messages=[{'role': 'user', 'content': text}])
+            plan = json.loads(result['content'].split('<plan>')[1].split('</plan>')[0])
+            self.assertEqual([task['operation'] for task in plan['tasks']], ['delete','create'])
+        creation = {'tasks': [{'name': '设计 </plan> 按钮'}]}
+        result = self.chat(support._chat(json.dumps(creation)), planning=True,
+                           messages=[{'role': 'user', 'content': '请新建一个任务处理项目删除'}])
+        plan = json.loads(result['content'].split('<plan>')[1].split('</plan>')[0])
+        self.assertEqual(plan['tasks'][0]['name'], creation['tasks'][0]['name'])
+        self.assertEqual(plan['tasks'][0]['operation'], 'create')

@@ -933,10 +933,13 @@ function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{
    The assistant's delete cards follow it, so the assistant can do exactly
    what its user can. */
 function canDeleteTask(t){
-  if(!t||t.fixed||t.repeatId||['pending_approval','awaiting_approval','submitted'].includes(t.status))return false;
-  if(S.user?.admin)return true;
-  const p=t.projectId?S.projects.find(p=>p.id===t.projectId):null;
-  return p?p.owner===S.user?.id&&p.status==='active':t.creator===S.user?.id||t.creator==null&&t.assignee===S.user?.id;
+  if(!t||!S.user||t.fixed||t.repeatId||['pending_approval','awaiting_approval','submitted','rejected'].includes(t.status))return false;
+  if(S.user.admin)return true;
+  if(t.projectId){
+    const project=S.projects.find(p=>p.id===t.projectId);
+    return project?.owner===S.user.id&&project.status==='active';
+  }
+  return t.creator===S.user.id||t.creator==null&&t.assignee===S.user.id;
 }
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
@@ -970,7 +973,7 @@ function openDrawer(id){
     +`</button><button class="defer-btn" id="deferTask">${tr('{0}未完成，递延',icon('arrow-up-right'))}</button></div>`:'';
   const editSummary=editPending?renderEditRequestSummary(t):'';
   /* superadmin removes any task; a project's Owner removes work in their running project. */
-  const canDelete=canDeleteTask(t)&&!rejected;
+  const canDelete=canDeleteTask(t);
   const canDirectEdit=(S.user.admin||(perform&&ownTemp)||giver)&&!editPending&&(!p||p.status==='active')
     &&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status);
   $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}`
@@ -5971,7 +5974,7 @@ function agentAppend(role,content,kind='',intent=''){
   if(chip)el.appendChild(chip);
   /* The chip carries the intent, so the mark itself would just be noise in the
      bubble — the stored line keeps it, the transcript does not. */
-  const shown=intent==='plan'?agentPlanIntent(content).body:content;
+  const shown=intent==='plan'?agentPlanIntent(content).body:role==='assistant'?trServer(content):content;
   el.appendChild(document.createTextNode(shown));
   agentToolSummary(el,tools);
   if(!kind)agentMessageTools(el,{role,content},agentState.messages.length-1);
@@ -6105,7 +6108,7 @@ function agentMessageNode(m,index=-1){
   const intent=m.role==='user'?agentPlanIntent(m.content):{plan:false,body:m.content||''};
   const chip=agentIntentChip(intent.plan?'plan':'');
   if(chip)node.appendChild(chip);
-  const text=document.createElement('span');text.textContent=intent.plan?intent.body:(m.content||'');node.appendChild(text);
+  const text=document.createElement('span');text.textContent=m.role==='assistant'?trServer(intent.body):intent.body;node.appendChild(text);
   /* A stored draft reads as a one-line summary and can be opened again as cards. */
   if(m.role==='assistant'&&/<plan>/i.test(m.content||'')){
     const draft=agentSplitPlan(m.content);
@@ -6458,12 +6461,15 @@ function agentTogglePlan(){
 /* A message that asks to create, change or delete work, sent outside the
    mode, gets one question first: switch the mode on, or just ask. Questions
    about the work ("哪些", "多少"…) are left alone. */
-const AGENT_MANAGE_VERB=/(删除|删掉|删了|删去|清掉|清空|移除|去掉|新建|创建|建一?个|加一?个|添加|帮我安排|安排一?个|指派给?|分配给|改到|改成|修改|挪到|推迟|延期|提前到|\b(create|add|delete|remove|assign|reschedule)\b)/i;
+const AGENT_MANAGE_VERB=/(删除|删掉|删了|删去|删一下|删一删|清掉|清空|移除|去掉|新建|创建|建一?个|加一?个|添加|帮我安排|安排一?个|指派给?|分配给|改到|改成|修改|挪到|推迟|延期|提前到|\b(create|add|delete|remove|assign|reschedule)\b)/i;
 const AGENT_ASK_ONLY=/(哪些|什么|多少|几个|几项|有没有|是否|怎么样|\b(what|which|how many|show me|list)\b)/i;
 function agentManageIntent(text){
-  const t=String(text||'').trim();
-  const query=/^(?:(?:请|帮我)\s*)?(?:查(?:看|询)?|看看|列出|告诉|统计|问问|说说)|^(?:please\s+)?(?:show|list|tell|check)\b/i;
-  if(query.test(t)||!AGENT_MANAGE_VERB.test(t))return false;
+  const t=String(text||'').trim()
+    .replace(/^(?:(?:不是|大哥|不对|我是说)[，,、\s]+)*/,'')
+    .replace(/「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"|`[^`]*`/g,'目标');
+  const query=/^(?:请问|想问|问一下|我想知道|(?:(?:请|帮我)\s*)?(?:查(?:看|询)?|看看|列出|告诉|统计|问问|说说))|^(?:please\s+)?(?:show|list|tell|check)\b/i;
+  const negative=/^(?:(?:请|帮我|麻烦你?)\s*)*(?:不要|别|不用|不需要|取消)|^(?:please\s+)?(?:don.t|do not)\b/i;
+  if(query.test(t)||negative.test(t)||/怎么|如何/.test(t)||!AGENT_MANAGE_VERB.test(t))return false;
   return !AGENT_ASK_ONLY.test(t)||/^(请|帮我|把|please\b)/i.test(t);
 }
 function agentOfferManage(text){
@@ -6537,7 +6543,7 @@ const AGENT_PLAN_RULE='这次是一条任务/项目管理请求。先判断是�
   +'任务放进已有项目时写 projectId，放进新项目时写 projectRef，都不写就是临时任务。'
   +'name 只写事情本身，不带项目名前缀；projectId 与账户必须是数据里真实存在的 id（账户写 id，不是中文名）；'
   +'date 不早于今天、不晚于可排期上限；用户没说的按默认补齐：负责人为点名的人，否则当前账户；日期今天；时间 09:00；时长 60；优先级 P1。'
-  +'缺少项目名、任务名、负责人等信息也要返回草稿卡片：未知字段用空字符串，missing 数组说明需要用户补充什么，不能因为信息不全拒绝生成。'
+  +'只有新建时，缺少项目名、任务名、负责人等信息才用空字符串起草，并用 missing 说明要补充什么；修改或删除查不到匹配项时，直接说明结果。'
   +'如果用户点名了不存在或不能确定的负责人，不要擅自改派；assignee 留空并在 missing 中注明。宁可少拆几张，也不要编造不存在的项目或账户。';
 function agentSystemPrompt(context,planning){
   /* The prompts stay in Chinese (the server's receipts and checks speak it);
@@ -6566,7 +6572,11 @@ function agentRecentMessages(){
   const recent=agentState.messages
     .filter(x=>String(x.content||'').trim())
     .slice(-AGENT_CONTEXT_LIMIT)
-    .map(x=>({role:x.role,content:x.content}));
+    .map(({role,content})=>({
+      role,content:role==='assistant'&&content.length>40000
+        ?content.replace(/<plan>[\s\S]*?<\/plan>/gi,'（完整草稿保存在管理卡片中；如需任务明细，请重新查询。）')
+        :content
+    }));
   if(agentState.runGoal&&!recent.some(m=>m.role==='user'&&m.content===agentState.runGoal))recent.unshift({role:'user',content:agentState.runGoal});
   return recent;
 }
@@ -6912,6 +6922,7 @@ async function agentPlanSubmit(body,preserveInput=false){
     agentState.busy=false;agentState.runGoal='';agentUpdateBusy();input.focus();
   }
 }
+const PLAN_CARD_LIMITS={project:20,task:100};
 const PLAN_DAY=/^\d{4}-\d{2}-\d{2}$/;
 function planDay(v,fallback){v=String(v||'');return PLAN_DAY.test(v)&&v<=DATE_HORIZON?(v<S.today?S.today:v):fallback}
 function planUser(v){v=String(v||'').trim();if(!v)return '';const u=S.users.find(u=>u.id===v)||S.users.find(u=>u.displayName===v||u.nickname===v);return u&&u.active?u.id:''}
@@ -6919,12 +6930,12 @@ function planUser(v){v=String(v||'').trim();if(!v)return '';const u=S.users.find
    are dropped to sensible defaults rather than carried along. */
 function planDraft(raw){
   const admin=Boolean(S.user?.admin),people=S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
-  const projects=(raw.projects||[]).slice(0,6).map((p,i)=>{
+  const projects=(raw.projects||[]).slice(0,PLAN_CARD_LIMITS.project).map((p,i)=>{
     const owner=admin?(p.owner?planUser(p.owner):(people[0]||'')):S.user.id;
     const members=[...new Set((Array.isArray(p.members)?p.members:[]).map(planUser).filter(id=>id&&id!==owner&&people.includes(id)))];
     return {ref:String(p.ref||'P'+(i+1)),name:String(p.name||'').trim().slice(0,120),desc:String(p.desc||'').slice(0,2000),start:planDay(p.start,S.today),end:planDay(p.end,''),owner,members,priority:['P0','P1','P2'].includes(p.priority)?p.priority:'P1',status:'active',state:'draft'};
   });
-  const tasks=(raw.tasks||[]).slice(0,30).map((t,i)=>{
+  const tasks=(raw.tasks||[]).slice(0,PLAN_CARD_LIMITS.task).map((t,i)=>{
     const ref=projects.find(p=>p.ref===String(t.projectRef||'')),existing=S.projects.find(p=>p.id===t.projectId);
     const project=ref?'ref:'+ref.ref:existing?'id:'+existing.id:(t.projectId||t.projectRef)?'missing:'+String(t.projectId||t.projectRef):'';
     const name=agentTidyTaskName('task.create',{name:String(t.name||'').trim().slice(0,120),projectId:existing?.id}).name;
@@ -7058,7 +7069,7 @@ async function planFlush(board){
   const user=S.user?.id,snapshot=planSnapshot(board),serialized=JSON.stringify(snapshot);
   if(serialized===board.savedSnapshot)return;
   board.saving=(async()=>{
-    try{const r=await api('/api/action',{action:'agent.draft.save',data:{draftId:board.draftId,conversationId:board.conversationId,version:board.persistVersion||0,writer:agentState.clientId,board:snapshot}});
+    try{const r=await api('/api/agent/draft',{action:'agent.draft.save',data:{draftId:board.draftId,conversationId:board.conversationId,version:board.persistVersion||0,writer:agentState.clientId,board:snapshot}});
       if(S.user?.id!==user)return;board.persistVersion=r.version;board.savedSnapshot=serialized;board.saveError='';planCache(board,planSnapshot(board));
     }catch(e){board.saveError=e.message||tr('未同步，已保留本机草稿');const raw=e.status===409?String(e.raw??''):'';board.conflict=/其他页面|已删除/.test(raw);board.deleted=/已删除/.test(raw);}
     finally{board.saving=null;const status=board.el?.querySelector?.('.plan-save-status');if(status)status.textContent=board.saveError||'';if(board.conflict)planRender(board);}
@@ -7129,7 +7140,7 @@ function planMutationPath(x,kind){
   if(kind==='project')return {mode:admin||before.owner===S.user.id?'direct':'none',note:tr('只有管理员或 Owner 可以管理此项目')};
   const p=S.projects.find(p=>p.id===before.projectId);
   const assignees=p?projectAssignees(p).map(u=>u.id):S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
-  if(op==='delete')return {mode:canDeleteTask(before)?'direct':'none',assignees,note:tr('你没有删除这项任务的权限；固定安排请挖空本次，待审批任务先完成审批')};
+  if(op==='delete')return {mode:canDeleteTask(before)?'direct':'none',assignees,note:before.status==='rejected'?tr('已驳回任务不能删除'):tr('你没有删除这项任务的权限；固定安排请挖空本次，待审批任务先完成审批')};
   if(['done','deferred','skipped','pending_approval','rejected'].includes(before.status))return {mode:'none',assignees,note:tr('已归档或待审批任务不可调整')};
   if(before.projectId&&p?.status!=='active')return {mode:'none',assignees,note:tr('只能调整进行中项目的任务')};
   const direct=admin||(before.projectId?p?.owner===S.user.id:before.creator===S.user.id||before.creator==null&&before.assignee===S.user.id);

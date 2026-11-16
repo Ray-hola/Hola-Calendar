@@ -4,6 +4,7 @@ The connection is disposable and never attaches the application's database.
 SQL runs with a read-only authorizer, function allow-list and resource limits.
 """
 import json
+import re
 import sqlite3
 import time
 
@@ -44,6 +45,65 @@ def compact(value):
 
 class WorkspaceError(Exception):
     pass
+
+
+# The model interprets open-ended requests. This backstop recognizes explicit
+# delete-only commands whose drafts must never contain a create or update.
+_DELETE_COMMAND = r'(?:删除|删掉|删去|删了|删一下|删一删|清掉|清空|移除|去掉|删)'
+_OTHER_COMMAND = r'(?:新建|创建|添加|新增|安排|建一个|改成|修改|调整|指派|分配|延期|移到|挪到)'
+_DRAFT_BLOCK = re.compile(r'<plan>([\s\S]*?)</plan>', re.I)
+DELETE_INTENT_MISMATCH = '这是删除请求，但模型返回了其他操作。未生成卡片，请重试或明确要删除的任务或项目。'
+
+
+class DeleteIntentMismatch(WorkspaceError):
+    pass
+
+
+def explicit_delete_request(text):
+    text = re.sub(r'^\s*(?:✦|/plan|\[规划\]|\[plan\])\s*', '', text, flags=re.I)
+    text = re.sub(r'^\s*(?:(?:不是|大哥|不对|我是说)[，,、\s]+)*', '', text).strip()
+    text = re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"|`[^`]*`', '目标', text)
+    if re.match(r'^(?:请问|想问|问一下|(?:请|帮我)?(?:查|看看?|列出|告诉|统计)|(?:请|帮我)?(?:不要|别|不用|不需要|取消))', text):
+        return False
+    text = re.sub(r'^(?:(?:可以|能不能|可否|请|帮我|替我|麻烦你?|给我)\s*)+', '', text)
+    if re.match(r'^(?:不要|别|不用|不需要|取消|' + _OTHER_COMMAND + ')', text):
+        return False
+    if re.search(r'怎么|如何|是否|哪些|多少|要不要|能否删除|能不能删除', text):
+        return False
+    if re.match(r'^(?:please\s+)?(?:delete|remove|clear)\b', text, re.I):
+        return not re.search(r'(?:\band\b|\bthen\b|[,;])\s*(?:also\s+)?(?:create|add|update|assign|reschedule)\b', text, re.I)
+    if re.search(r'(?:并且|并|然后|之后|再|接着|同时|顺便|以及|[，,；;、])\s*(?:帮我|给我|请)?\s*' + _OTHER_COMMAND, text):
+        return False
+    if re.match('^' + _DELETE_COMMAND, text):
+        return True
+    if not re.match(r'^把', text) and not re.search(r'任务|待办|项目', text):
+        return False
+    if re.search(r'(?:不要|别|无需|不用)\s*' + _DELETE_COMMAND, text):
+        return False
+    return bool(re.search(_DELETE_COMMAND + r'(?:吧|好吗|[。！？!?\s])*$', text))
+
+
+def enforce_delete_intent(data, delete_only):
+    if not delete_only or not isinstance(data, dict):
+        return
+    for key in ('projects', 'tasks'):
+        items = data.get(key)
+        if isinstance(items, list) and any(isinstance(item, dict) and item.get('operation', 'create') != 'delete' for item in items):
+            raise DeleteIntentMismatch(DELETE_INTENT_MISMATCH)
+
+
+def assistant_context_text(text, max_chars):
+    """A large saved draft remains intact in history, but is too big to replay."""
+    if len(text) <= max_chars:
+        return text
+    return _DRAFT_BLOCK.sub('（完整草稿保存在管理卡片中；如需任务明细，请重新查询。）', text)
+
+
+def model_claims_query_unavailable(text):
+    return bool(re.search(
+        r'(?:workspace_query|(?:工作台)?查询工具|工作区工具).{0,28}(?:不可用|无法使用|未启用|未提供|不存在|没有开放|unavailable|not available|disabled)'
+        r'|(?:没有|无法使用|缺少|找不到).{0,16}(?:workspace_query|查询工具|工作区工具)'
+        r'|(?:do not|don.t|cannot) (?:have access to|use).{0,25}workspace_query', text, re.I))
 
 
 def page_number(value, default):

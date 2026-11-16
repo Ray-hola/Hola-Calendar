@@ -269,7 +269,7 @@ test('rule groups live in 系统设置: a list of groups, each made or changed o
 
 test('every drafted card says what will happen to it before anything is sent', () => {
   const a=app();
-  a.run(['PLAN_DAY','planDay','planUser','agentNewConversationId','agentTidyTaskName','planDraft','planTaskPath'].map(liftFunction).join('\n'));
+  a.run(['PLAN_CARD_LIMITS','PLAN_DAY','planDay','planUser','agentNewConversationId','agentTidyTaskName','planDraft','planTaskPath'].map(liftFunction).join('\n'));
   a.run(`S.today='2026-11-02';S.user={id:'test002',admin:0};S.users=[{id:'superadmin',admin:1,active:1},{id:'test001',active:1,displayName:'林一'},{id:'test002',active:1},{id:'test003',active:1}];
     S.projects=[{id:'p',name:'甲',owner:'test001',status:'active',members:{test001:'accepted',test002:'accepted'}},{id:'w',name:'待批',owner:'test002',status:'pending',members:{test002:'accepted'}}];
     S.creationRules={project:'approval',tempTask:'direct',projectTask:'none'};
@@ -2195,13 +2195,40 @@ test('the assistant may delete exactly what its user may delete',()=>{
   assert.equal(can({projectId:'p',assignee:'test002'}),true,'自己做 Owner 的项目');
   assert.equal(can({projectId:'q',assignee:'test001'}),false,'别人的项目');
   assert.equal(can({creator:'test001',fixed:true}),false,'固定安排');
+  assert.equal(can({projectId:'missing',creator:'test001'}),false,'项目不可见时不能套用临时任务权限');
+  assert.equal(can({creator:'test001',status:'rejected'}),false,'已驳回任务保持不可删除');
+  assert.equal(a.run(`planMutationPath({operation:'delete',id:'t',revision:'r',before:{creator:'test001',status:'rejected'}},'task').mode`),'none');
   assert.equal(a.run(`planMutationPath({operation:'delete',id:'t',revision:'r',before:{creator:'test001',assignee:'test001'}},'task').mode`),'direct');
   a.run("S.user={id:'superadmin',admin:1}");assert.equal(can({creator:'test002'}),true);
 });
 test('management requests outside the mode are recognised, questions are not',()=>{
   const a=planningApp();
-  for(const t of ['把我未完成的临时任务全都删掉','帮我把陈曦的临时任务都删掉','新建一个任务：周五交周报','把评审改到下周一','请删除几个过期任务','帮我创建一个名为「什么是交付」的任务'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),true,t);
-  for(const t of ['今天有哪些任务要交','这周完成了多少任务','请列出哪些任务被删除了','你好'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),false,t);
+  for(const t of ['把我未完成的临时任务全都删掉','帮我把陈曦的临时任务都删掉','新建一个任务：周五交周报','把评审改到下周一','请删除几个过期任务','帮我创建一个名为「什么是交付」的任务','帮我把今天的临时任务删一下','不是，大哥，把今天的临时任务全删了'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),true,t);
+  for(const t of ['今天有哪些任务要交','这周完成了多少任务','请列出哪些任务被删除了','请问我删除了哪些临时任务？','请告诉我怎么删除项目','别删我的任务','帮我别删除任务','你好'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),false,t);
+});
+test('the board renders all 100 tasks and 20 projects in a server draft',()=>{
+  const a=planningApp();
+  a.context.fixture={
+    tasks:Array.from({length:100},(_,i)=>({name:'任务'+i,cardId:'task-'+i})),
+    projects:Array.from({length:20},(_,i)=>({name:'项目'+i,cardId:'project-'+i}))
+  };
+  const summary=a.json(`(()=>{
+    const draft=planDraft(fixture), html=planCardsHTML(draft);
+    return {tasks:draft.tasks.length,projects:draft.projects.length,
+      hasLastTask:html.includes('任务99'),hasLastProject:html.includes('项目19')};
+  })()`);
+  assert.deepEqual(summary,{tasks:100,projects:20,hasLastTask:true,hasLastProject:true});
+});
+test('a large management draft stays in the transcript without being sent back to the model',()=>{
+  const a=planningApp();
+  const draft='检查后确认。\n<plan>'+JSON.stringify({tasks:[{name:'长标题'.repeat(16000)}]})+'</plan>';
+  a.context.fixture=draft;
+  a.run(`agentState.messages=[{role:'assistant',content:fixture},{role:'user',content:'下一步怎么做'}]`);
+  const sent=a.json('agentRecentMessages()');
+  assert.match(sent[0].content,/检查后确认/);
+  assert.match(sent[0].content,/完整草稿保存在管理卡片中/);
+  assert.equal(sent[1].content,'下一步怎么做');
+  assert.equal(a.run('agentState.messages[0].content'),draft);
 });
 test('a management offer preserves history and later text, and expires with its conversation',()=>{
   const a=planningApp(),input={value:'Another draft'};
