@@ -1037,17 +1037,18 @@ test('the planning rule rides in the system prompt, not around the message', () 
     '旧的「把提示词包在用户消息外面」的写法应已移除，否则记录里存的就是提示词而不是原话');
 });
 
-test('规划任务 is a switch on the composer: it drafts what is typed, or the next message', () => {
+test('管理任务 / 项目 is a mode: switching it on never sends, and it stays on across messages', () => {
   const toggle = source.match(/function agentTogglePlan\(\)\{[\s\S]*?\n\}/)[0];
   assert.ok(!/input\.value=AGENT_PLAN_MARK/.test(toggle), '不再往输入框里塞前缀');
-  assert.ok(/agentPlanSubmit\(text\)/.test(toggle), '框里已经有字时，点一下直接起草');
-  assert.ok(/agentState\.plan=!agentState\.plan/.test(toggle), '框里没字时，切换成「下一条起草」');
+  assert.ok(!/agentPlanSubmit/.test(toggle), '点开关只切换模式，不发送框里的字');
+  assert.ok(/agentState\.plan=!agentState\.plan/.test(toggle), '点一下切换模式');
   assert.ok(/input\.value=intent\.body/.test(toggle), '手打的前缀点一下就取下来');
 
-  const submit = source.match(/async function agentSubmit\(\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/if\(intent\.plan\|\|agentState\.plan\)\{[^}]*return agentPlanSubmit\(intent\.body\)\}/.test(submit),
-    '开关打开或带前缀时，发送转到起草');
-  assert.ok(/async function agentPlanSubmit\(body\)/.test(source),
+  const submit = source.match(/async function agentSubmit\(asking=false,offeredText\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/if\(!asking&&\(intent\.plan\|\|agentState\.plan\)\)return agentPlanSubmit\(intent\.body\)/.test(submit),
+    '模式打开或带前缀时，发送转到起草，且不关掉模式');
+  assert.ok(/agentManageIntent\(text\)&&agentOfferManage\(text\)/.test(submit), '模式外的管理请求先问一句');
+  assert.ok(/async function agentPlanSubmit\(body,preserveInput=false\)/.test(source),
     '规划以正文为参数，不再自己去读输入框');
 });
 
@@ -2070,13 +2071,13 @@ test('editing an existing card preserves past dates and sends only changed field
   assert.deepEqual(writes[0].data.changes,{name:'拟修改名称'});
   await a.run('planSubmit(board)');assert.equal(writes.length,1);
 });
-test('delete cards cannot submit before human confirmation and never use automatic action execution',async()=>{
+test('a task delete card is confirmed once, by accepting it, and never through automatic action execution',async()=>{
   const a=planningApp(),writes=[];a.context.document={querySelector:()=>null};
   a.context.fetch=async(path,o)=>{writes.push(JSON.parse(o.body));return {ok:true,text:async()=>'{"deleted":true}'}};
   a.context.raw=mutationTask({operation:'delete'});
   a.run(`refresh=async()=>{};agentAppend=()=>{};agentState.mode='auto';var board={...planDraft({tasks:[raw]}),el:{querySelector:()=>null},history:[]};`);
-  await a.run('planSubmit(board)');assert.equal(writes.length,0);
-  a.run('board.tasks[0].deleteConfirmed=true');await a.run('planSubmit(board)');
+  assert.ok(!a.run('planCardsHTML(board)').includes('type="checkbox" data-f="deleteConfirmed"'),'不再要求额外勾选');
+  await a.run('planSubmit(board)');
   assert.equal(writes.length,1);assert.equal(writes[0].data.operation,'delete');assert.equal(writes[0].data.confirm,'原任务');
   assert.ok(!a.run('planCardsHTML({...planDraft({tasks:[raw]})})').includes('<pre'));
 });
@@ -2177,6 +2178,51 @@ test('restoring a saved draft keeps edited fields and rejected decisions',async(
   const board=await a.run(`agentRestoreBoard({draftId:'draft-identity',tasks:[{name:'原名',cardId:'task-identity'}]})`);
   assert.equal(board.tasks[0].name,'用户编辑');assert.equal(board.tasks[0].state,'rejected');assert.equal(board.persistVersion,3);
 });
+test('undo skips checkpoints that equal the board on screen',()=>{
+  const a=planningApp();
+  a.run(`var board={...planDraft({tasks:[{name:'原任务',assignee:'test001'}]}),history:[]};
+    planCheckpoint(board);board.tasks[0].name='新名字';planCheckpoint(board);`);
+  assert.equal(a.run('planCanUndo(board)'),true);
+  a.run('planUndo(board)');assert.equal(a.run('board.tasks[0].name'),'原任务','一次撤销就回到修改前');
+  assert.equal(a.run('planCanUndo(board)'),false);
+});
+test('the assistant may delete exactly what its user may delete',()=>{
+  const a=planningApp();
+  a.run(`S.projects=[{id:'p',owner:'test001',status:'active'},{id:'q',owner:'test002',status:'active'}];S.user={id:'test001'};`);
+  const can=t=>a.run(`canDeleteTask(${JSON.stringify(t)})`);
+  assert.equal(can({creator:'test001',assignee:'test001'}),true,'自己建的临时任务');
+  assert.equal(can({creator:'test002',assignee:'test001'}),false,'别人指派的临时任务');
+  assert.equal(can({projectId:'p',assignee:'test002'}),true,'自己做 Owner 的项目');
+  assert.equal(can({projectId:'q',assignee:'test001'}),false,'别人的项目');
+  assert.equal(can({creator:'test001',fixed:true}),false,'固定安排');
+  assert.equal(a.run(`planMutationPath({operation:'delete',id:'t',revision:'r',before:{creator:'test001',assignee:'test001'}},'task').mode`),'direct');
+  a.run("S.user={id:'superadmin',admin:1}");assert.equal(can({creator:'test002'}),true);
+});
+test('management requests outside the mode are recognised, questions are not',()=>{
+  const a=planningApp();
+  for(const t of ['把我未完成的临时任务全都删掉','帮我把陈曦的临时任务都删掉','新建一个任务：周五交周报','把评审改到下周一','请删除几个过期任务','帮我创建一个名为「什么是交付」的任务'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),true,t);
+  for(const t of ['今天有哪些任务要交','这周完成了多少任务','请列出哪些任务被删除了','你好'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),false,t);
+});
+test('a management offer preserves history and later text, and expires with its conversation',()=>{
+  const a=planningApp(),input={value:'Another draft'};
+  let offer,activate;
+  const selectors=[];
+  const list={querySelector(s){selectors.push(s);return offer},appendChild(el){offer=el;el.isConnected=true}};
+  a.context.document={
+    querySelector:s=>s==='#agentMessages'?list:s==='#agentInput'?input:null,
+    createElement:()=>({setAttribute(){},addEventListener(_,fn){activate=fn},
+      remove(){this.isConnected=false;offer=null},querySelector(){return null}})
+  };
+  a.run(`var replies=[];agentState.conversationId='first';agentPlanSubmit=(...args)=>replies.push(args);
+    agentSubmit=(...args)=>replies.push(args);`);
+  const choose=intent=>activate({target:{closest:()=>({dataset:{intent}})}});
+  a.run("agentOfferManage('删除任务')");choose('ask');
+  assert.deepEqual(a.json('replies'),[[true,'删除任务']]);
+  assert.equal(input.value,'Another draft');
+  a.run("agentOfferManage('删除项目');agentState.conversationId='second'");choose('manage');
+  assert.equal(a.run('replies.length'),1);
+  assert.deepEqual(selectors,['.agent-manage-offer','.agent-manage-offer']);
+});
 test('draft saving serializes edits against the returned version and keeps stable IDs',async()=>{
   const a=planningApp(),pending=[],cache=new Map();a.context.document={querySelector:()=>null};a.context.clearTimeout=()=>{};a.context.localStorage={getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v)};
   a.context.fetch=(path,o)=>new Promise(resolve=>pending.push({body:JSON.parse(o.body),reply:v=>resolve({ok:true,text:async()=>JSON.stringify(v)})}));
@@ -2213,7 +2259,7 @@ test('persisting an edit sends the previous stored message as a durable branch a
   assert.equal(await a.run('agentPersistEdit()'),true);assert.equal(calls[0].data.messageId,'anchor');assert.equal(calls[0].data.conversationId,'thread');
 });
 test('planning failures preserve a modification request instead of manufacturing a create card',async()=>{
-  const a=planningApp(),input={value:'',focus(){}},messages={appendChild(){},scrollHeight:0};a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentMessages'?messages:null};a.context.AbortController=AbortController;
+  const a=planningApp(),input={value:'',focus(){}},messages={appendChild(){},querySelector(){return null},scrollHeight:0};a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentMessages'?messages:null};a.context.AbortController=AbortController;
   a.run(`var boards=0;agentAppend=()=>({remove(){}});agentPlanBoard=()=>boards++;agentRequest=async()=>{throw Error('fixture failure')};agentState.messages=[];`);
   await a.run("agentPlanSubmit('删除昨天那个任务')");assert.equal(a.run('boards'),0);assert.equal(input.value,'删除昨天那个任务');
 });

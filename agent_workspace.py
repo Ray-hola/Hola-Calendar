@@ -9,7 +9,9 @@ import time
 
 RESULT_CHARS = 8_000
 MAX_ROWS = 100
-MAX_CALLS = 8
+MAX_CALLS = 12
+# One draft holds this many cards; bigger requests are drafted in groups.
+CARD_LIMITS = {'project': 20, 'task': 100}
 
 # JSON columns preserve domain details; flat columns make joins and aggregates easy.
 TABLES = {
@@ -44,6 +46,18 @@ class WorkspaceError(Exception):
     pass
 
 
+def page_number(value, default):
+    if value is None or value == '':
+        return default
+    if isinstance(value, str):
+        digits = value.strip()
+        if digits.isascii() and digits.isdecimal():
+            return int(digits.lstrip('0')[:12] or '0')
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def schema():
     return {'dialect': 'SQLite', 'tables': {name: {'description': info[0], 'columns': info[1].split() + ['data']}
                                            for name, info in TABLES.items()},
@@ -69,8 +83,8 @@ def tools(actions):
     card = {'type': 'object', 'properties': {'operation': {'type': 'string', 'enum': ['create', 'update', 'delete']},
             'id': text}, 'additionalProperties': True}
     result.append(function('work_cards', '统一起草任务和项目的创建、修改、删除卡片。修改/删除须先查询真实 id；字段直接放在卡片对象上，只传要改的字段。此工具只起草，等待用户在卡片里编辑并确认；不能自动执行。',
-                           {'projects': {'type': 'array', 'items': card, 'maxItems': 6},
-                            'tasks': {'type': 'array', 'items': card, 'maxItems': 30}}))
+                           {'projects': {'type': 'array', 'items': card, 'maxItems': CARD_LIMITS['project']},
+                            'tasks': {'type': 'array', 'items': card, 'maxItems': CARD_LIMITS['task']}}))
     if actions:
         result.append(function('business_action', '准备一项业务修改，交给页面已有确认与执行流程。这里只提出操作，不代表操作已执行；一次只提出一项。',
                                {'action': {'type': 'string', 'enum': actions}, 'data': {'type': 'object'}}, ['action', 'data']))
@@ -84,7 +98,10 @@ class Workspace:
     def query(self, args):
         sql = args.get('sql')
         params = args.get('params', [])
-        offset, limit = args.get('offset', 0), args.get('limit', 30)
+        # Models often send numbers as strings or ask for more rows than a page
+        # holds; read those as a page request rather than failing the query.
+        offset, limit = page_number(args.get('offset'), 0), page_number(args.get('limit'), 50)
+        limit = max(1, min(limit, MAX_ROWS)) if type(limit) is int else limit
         if not isinstance(sql, str) or not sql.strip() or len(sql) > 6_000:
             raise WorkspaceError('请提供不超过6000字符的 SELECT 或 WITH 查询')
         if not isinstance(params, list) or len(params) > 100 or any(not isinstance(p, (str, int, float, type(None))) for p in params):

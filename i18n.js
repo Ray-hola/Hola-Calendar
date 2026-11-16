@@ -1095,6 +1095,13 @@ var HOLA_I18N_EN={
   '草稿':'Draft',
   '{0}已创建':'{0}Created',
   '接受所选':'Accept selected',
+  '你没有删除这项任务的权限；固定安排请挖空本次，待审批任务先完成审批':'You can’t delete this task; skip a recurring occurrence instead, and finish approval for pending tasks first',
+  '这像是要管理任务或项目。打开「管理任务 / 项目」，助手会先查出要改的那些，再起草卡片给你确认。':'This looks like managing tasks or projects. Turn on “Manage tasks / projects” and the assistant will find the ones to change, then draft cards for you to confirm.',
+  '打开并继续':'Turn on and continue',
+  '只是问问':'Just asking',
+  '全部拒绝':'Reject all',
+  '拒绝所选 {0} 项':'Reject {0} selected',
+  '全部接受（{0}）':'Accept all ({0})',
   '点顶栏的桌面小组件图标':'Click the desktop widget icon in the top bar',
   '小组件浮在所有窗口之上':'The widget floats above all windows',
   '开始一轮 25 分钟专注':'Start a 25-minute focus session',
@@ -2474,6 +2481,7 @@ var HOLA_I18N_EN={
   '还没有已结项的项目':'No finished projects yet',
   '成果库中的项目仅供读取，或你已无权访问该项目':'Projects in Achievements are read-only, or you no longer have access to this project',
   '只有 superadmin 可以删除临时任务':'Only superadmin can delete one-off tasks',
+  '只能删除自己创建的临时任务':'You can only delete one-off tasks you created',
   '项目不在进行中，不能删除任务':'The project is not running, so its tasks cannot be deleted',
 };
 /* Templated text the server writes (notifications, errors). Each pattern

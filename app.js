@@ -844,6 +844,16 @@ function taskHistoryHTML(task,ids=taskLineageIds(task)){
   return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([day,events])=>section(day?fmt(day):tr('任务记录'),events)).join('')+(shared.length?section(tr('合并操作'),shared):'');
 }
 function logTime(iso){const m=String(iso||'').match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);return m?tr('{0}月{1}日 {2}',Number(m[1]),Number(m[2]),m[3]):''}
+/* Who may delete a task, the same rule the server applies: superadmin, the
+   Owner of the running project, or a member for a temporary task they wrote.
+   The assistant's delete cards follow it, so the assistant can do exactly
+   what its user can. */
+function canDeleteTask(t){
+  if(!t||t.fixed||t.repeatId||['pending_approval','awaiting_approval','submitted'].includes(t.status))return false;
+  if(S.user?.admin)return true;
+  const p=t.projectId?S.projects.find(p=>p.id===t.projectId):null;
+  return p?p.owner===S.user?.id&&p.status==='active':t.creator===S.user?.id||t.creator==null&&t.assignee===S.user?.id;
+}
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
@@ -876,7 +886,7 @@ function openDrawer(id){
     +`</button><button class="defer-btn" id="deferTask">${tr('{0}未完成，递延',icon('arrow-up-right'))}</button></div>`:'';
   const editSummary=editPending?renderEditRequestSummary(t):'';
   /* superadmin removes any task; a project's Owner removes work in their running project. */
-  const canDelete=(S.user.admin||(p?.owner===S.user.id&&p.status==='active'))&&!t.fixed&&!t.repeatId&&!pendingApproval&&!rejected;
+  const canDelete=canDeleteTask(t)&&!rejected;
   const canDirectEdit=(S.user.admin||(perform&&ownTemp)||giver)&&!editPending&&(!p||p.status==='active')
     &&!['done','deferred','skipped','pending_approval','awaiting_approval','submitted','rejected'].includes(t.status);
   $('#drawerContent').innerHTML=`<div class="drawer-kicker">${escapeHTML(projectName(t))} · ${escapeHTML(t.priority)}`
@@ -6286,18 +6296,45 @@ function agentPlanIntent(text){
   }
   return {plan:false,body:String(text||'')};
 }
-/* 规划任务 is a switch on the composer rather than a command typed into it:
-   with words already in the box one click drafts them at once, otherwise the
-   next message is drafted. The typed marks above still work for people who
-   prefer them, and stored lines keep the mark so history can label them. */
+/* 管理任务 / 项目 is a mode, not a send button: switching it on never sends
+   what is typed, and every message drafts cards until it is switched off. The
+   typed marks above still work for people who prefer them, and stored lines
+   keep the mark so history can label them. */
 function agentTogglePlan(){
   const input=$('#agentInput');if(!input||agentState.busy||agentWriteBlocked())return;
   const intent=agentPlanIntent(input.value);
-  if(intent.plan){input.value=intent.body;agentState.plan=false}
-  else if(!agentState.plan&&input.value.trim()){const text=input.value;input.value='';agentState.plan=false;agentSyncPlanButton();agentPlanSubmit(text);return}
+  if(intent.plan){input.value=intent.body;agentState.plan=true}
   else agentState.plan=!agentState.plan;
   agentSyncPlanButton();
   input.focus();
+}
+/* A message that asks to create, change or delete work, sent outside the
+   mode, gets one question first: switch the mode on, or just ask. Questions
+   about the work ("哪些", "多少"…) are left alone. */
+const AGENT_MANAGE_VERB=/(删除|删掉|删了|删去|清掉|清空|移除|去掉|新建|创建|建一?个|加一?个|添加|帮我安排|安排一?个|指派给?|分配给|改到|改成|修改|挪到|推迟|延期|提前到|\b(create|add|delete|remove|assign|reschedule)\b)/i;
+const AGENT_ASK_ONLY=/(哪些|什么|多少|几个|几项|有没有|是否|怎么样|\b(what|which|how many|show me|list)\b)/i;
+function agentManageIntent(text){
+  const t=String(text||'').trim();
+  const query=/^(?:(?:请|帮我)\s*)?(?:查(?:看|询)?|看看|列出|告诉|统计|问问|说说)|^(?:please\s+)?(?:show|list|tell|check)\b/i;
+  if(query.test(t)||!AGENT_MANAGE_VERB.test(t))return false;
+  return !AGENT_ASK_ONLY.test(t)||/^(请|帮我|把|please\b)/i.test(t);
+}
+function agentOfferManage(text){
+  const list=$('#agentMessages');if(!list)return false;
+  list.querySelector('.agent-manage-offer')?.remove();
+  const owner=S.user?.id,thread=agentState.conversationId;
+  const el=document.createElement('div');el.className='agent-message assistant agent-manage-offer';el.setAttribute('role','group');
+  el.innerHTML=`<p>${tr('这像是要管理任务或项目。打开「管理任务 / 项目」，助手会先查出要改的那些，再起草卡片给你确认。')}</p>`
+    +`<div class="agent-intent-actions"><button type="button" class="primary-btn" data-intent="manage">${tr('打开并继续')}</button><button type="button" class="ghost-btn" data-intent="ask">${tr('只是问问')}</button></div>`;
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('[data-intent]');
+    if(!b||!el.isConnected||owner!==S.user?.id||thread!==agentState.conversationId||agentState.busy||agentWriteBlocked())return;
+    el.remove();
+    if(b.dataset.intent==='manage'){agentState.plan=true;agentSyncPlanButton();agentPlanSubmit(text,true)}
+    else agentSubmit(true,text);
+  });
+  list.appendChild(el);list.scrollTop=list.scrollHeight;el.querySelector('button')?.focus();
+  return true;
 }
 function agentSyncPlanButton(){
   const input=$('#agentInput');
@@ -6344,7 +6381,7 @@ const AGENT_CONTEXT_LIMIT=24;  /* how many turns we replay back to the model */
 function agentContext(){
   return {role:S.agentCapabilities?.role||'member',mode:S.agentCapabilities?.mode||'readonly',rules:S.user?.admin?null:creationRules(),self:S.user?.id||''};
 }
-const AGENT_PLAN_RULE='这次是一条任务/项目管理请求。把需求起草成可编辑卡片，operation 为 create/update/delete，修改或删除须先查询真实 id，只传要改的字段。'
+const AGENT_PLAN_RULE='这次是一条任务/项目管理请求。先判断是新建、修改还是删除：说「删掉/清掉/移除」的是删除已有任务，绝不能起草成一张名叫「删掉…」的新任务。把需求起草成可编辑卡片，operation 为 create/update/delete，修改或删除须先用 workspace_query 查出全部匹配的真实 id，只传要改的字段。'
   +'但不要执行任何操作，不要输出 <action> 动作块，也不要声称已经创建——用户会在卡片上逐个修改，再自己确认。'
   +'先用一句话（不超过 30 字，不列步骤，不解释你的推理）说明你怎么拆的，然后另起一行输出一个 <plan> 块，块里是单行 JSON 对象：'
   +'<plan>{"projects":[{"ref":"P1","name":"项目名","desc":"一句话说明","start":"YYYY-MM-DD","end":"YYYY-MM-DD 或空","owner":"负责人账户","members":["协作者账户"]}],'
@@ -6647,9 +6684,9 @@ async function agentLoop(context){
     agentAppend('assistant',tr('连续 {0} 步没有通过校验，先停在这里。可以补充必要信息，或手动处理后让我接着做。',agentState.failures),'error');
   return steps;
 }
-async function agentSubmit(){
+async function agentSubmit(asking=false,offeredText){
   const owner=S.user?.id,thread=agentState.conversationId;
-  const input=$('#agentInput'),text=input?.value.trim();if(!text||agentWriteBlocked())return;
+  const input=$('#agentInput'),text=offeredText??input?.value.trim();if(!input||!text||agentWriteBlocked())return;
   /* Dropping this on the floor is what made a stuck run look like it was
      eating messages: the text stayed in the box and nothing happened. */
   if(agentState.busy){
@@ -6660,10 +6697,12 @@ async function agentSubmit(){
   if(agentServerConfig&& !agentServerConfig.configured){agentOfferSetup();return}
   const intent=agentPlanIntent(text);
   /* The 规划任务 switch, or a typed mark, turns this message into a draft. */
-  if(intent.plan||agentState.plan){input.value='';agentState.plan=false;agentSyncPlanButton();return agentPlanSubmit(intent.body)}
+  if(!asking&&(intent.plan||agentState.plan))return agentPlanSubmit(intent.body);
+  if(!asking&&agentManageIntent(text)&&agentOfferManage(text)){input.value='';return}
   if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  $('#agentMessages')?.querySelector('.agent-manage-offer')?.remove();
   agentState.runGoal=text;agentSetPane('chat');
-  agentPrepareMessage(text);input.value='';const asked=agentAppend('user',text);
+  agentPrepareMessage(text);if(offeredText===undefined)input.value='';const asked=agentAppend('user',text);
   agentState.autoRun=false;agentState.stop=false;agentState.paused=false;agentState.steps=0;agentState.failures=0;
   agentState.mode=agentPref();agentState.lastActionKey='';agentState.repeats=0;
   agentState.pendingResolve=null;
@@ -6685,11 +6724,11 @@ async function agentSubmit(){
    like and pressed confirm; each card is then made through the same actions as
    the normal dialogs, under the user's own rules, so this works whatever the
    assistant itself is allowed to do. */
-async function agentPlanSubmit(body){
+async function agentPlanSubmit(body,preserveInput=false){
   const owner=S.user?.id,thread=agentState.conversationId;
   if(agentWriteBlocked())return;
-  const input=$('#agentInput');
-  if(agentServerConfig&&!agentServerConfig.configured){if(body!==undefined&&input)input.value=body;agentOfferSetup();return}
+  const input=$('#agentInput');if(!input)return;
+  if(agentServerConfig&&!agentServerConfig.configured){if(body!==undefined&&input&&(!preserveInput||!input.value))input.value=body;agentOfferSetup();return}
   const source=body===undefined?(input?.value||''):body;
   const text=agentPlanIntent(source).body.trim();
   if(!text){toast(tr('先在输入框里写下你的安排'));return}
@@ -6699,8 +6738,9 @@ async function agentPlanSubmit(body){
     return;
   }
   if(!await agentPersistEdit()||agentState.busy||owner!==S.user?.id||thread!==agentState.conversationId)return;
+  $('#agentMessages')?.querySelector('.agent-manage-offer')?.remove();
   agentState.runGoal=text;
-  agentPrepareMessage(text,true);input.value='';agentSyncPlanButton();
+  agentPrepareMessage(text,true);if(!preserveInput)input.value='';agentSyncPlanButton();
   agentAppend('user',AGENT_PLAN_MARK+' '+text,'','plan');
   agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();
   const wait=agentAppend('assistant',tr('正在起草卡片…'),'agent-drafting');
@@ -6712,13 +6752,13 @@ async function agentPlanSubmit(body){
     wait?.remove();
     const draft=agentSplitPlan(answer);
     if(!draft.projects.length&&!draft.tasks.length){
-      agentAppend('assistant',draft.clean||tr('没有生成可用卡片。请补充目标或稍后重试，原请求已保留。'),'error');input.value=text;return;
+      agentAppend('assistant',draft.clean||tr('没有生成可用卡片。请补充目标或稍后重试，原请求已保留。'),'error');if(!input.value)input.value=text;return;
     }
     agentPlanBoard(draft);
   }catch(e){
     wait?.remove();
     if(e.name!=='AbortError'){
-      input.value=text;agentSetPane('chat');
+      if(!input.value)input.value=text;agentSetPane('chat');
       agentAppend('assistant',e?.message||tr('暂时无法连接 Agent 服务。'),'error');
     }
   }finally{
@@ -6748,7 +6788,7 @@ function planDraft(raw){
     const rawItem=raw[kind+'s'][i],op=rawItem.operation||'create';x.operation=op;x.cardId=rawItem.cardId||agentNewConversationId();
     if(op==='create')return;
     const before=rawItem.before||{},changes=Object.fromEntries(Object.entries(rawItem).filter(([k])=>!['before','id','revision','impact','operation','ref','key'].includes(k)));
-    Object.assign(x,before,changes,{id:rawItem.id,before,revision:rawItem.revision,impact:rawItem.impact||{},operation:op,confirm:'',deleteConfirmed:false});
+    Object.assign(x,before,changes,{id:rawItem.id,before,revision:rawItem.revision,impact:rawItem.impact||{},operation:op,confirm:''});
     x.name=String(x.name||'');x.desc=String(x.desc||'');
     if(kind==='task')x.project=x.projectId?'id:'+x.projectId:'';
     else{const old=Object.keys(before.members||{}).filter(id=>id!==x.owner);x.addMembers=Array.isArray(rawItem.addMembers)?rawItem.addMembers:[];x.removeMembers=Array.isArray(rawItem.removeMembers)?rawItem.removeMembers:[];x.members=[...new Set([...old.filter(id=>!x.removeMembers.includes(id)),...x.addMembers])];}
@@ -6792,7 +6832,6 @@ function planProblems(board,x,scope=planOpenCards(board)){
     if(op==='delete'){
       if(kind==='project'&&scope.some(t=>t.ref==null&&(t.before?.projectId||t.project?.replace(/^id:/,''))===x.id&&planPending(t)))errors.target=tr('请分开接受项目删除与其关联任务的卡片');
       if(kind==='project'&&x.confirm!==x.before?.name)errors.confirm=tr('请输入完整项目名以确认删除');
-      if(kind==='task'&&!x.deleteConfirmed)errors.deleteConfirmed=tr('请勾选确认删除');
       return errors;
     }
     if(!Object.keys(planChanges(x,kind)).length)errors.changes=tr('请至少修改一个字段');
@@ -6826,8 +6865,8 @@ function planUpdateSelection(board){
   if(all){all.checked=open.length>0&&selected.length===open.length;all.indeterminate=selected.length>0&&selected.length<open.length;all.disabled=Boolean(board.busy)||!open.length;}
   const count=el.querySelector('.plan-select-count');if(count)count.textContent=selected.length?tr('已选 {0} 项',selected.length):tr('待处理 {0} 项',open.length);
   el.querySelectorAll('.plan-card').forEach(card=>{const x=card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key);card.classList.toggle('is-selected',Boolean(x?.selected));const box=card.querySelector('[data-plan-select]');if(box)box.checked=Boolean(x?.selected)});
-  el.querySelectorAll('.plan-accept-selected,.plan-reject-selected').forEach(b=>{b.disabled=Boolean(board.busy)||!selected.length;if(b.classList.contains('plan-accept-selected'))b.textContent=selected.length?tr('接受所选 {0} 项',selected.length):tr('接受所选')});
-  const acceptAll=el.querySelector('.plan-confirm');if(acceptAll){acceptAll.classList.toggle('primary-btn',!selected.length);acceptAll.classList.toggle('secondary-btn',Boolean(selected.length));acceptAll.title=tr('处理全部 {0} 张待处理卡片，包含未勾选项',open.length);acceptAll.setAttribute('aria-label',tr('全部接受，共 {0} 项',open.length));}
+  const reject=el.querySelector('.plan-reject-selected');if(reject){reject.disabled=Boolean(board.busy)||!open.length;reject.textContent=selected.length?tr('拒绝所选 {0} 项',selected.length):tr('全部拒绝')}
+  const accept=el.querySelector('.plan-confirm');if(accept&&!board.busy){accept.disabled=!open.length;accept.textContent=selected.length?tr('接受所选 {0} 项',selected.length):tr('全部接受（{0}）',open.length)}
   planScheduleSave(board);
 }
 async function planRetire(board,x,state,result){
@@ -6903,13 +6942,20 @@ async function agentRestoreBoard(raw,loading=false){
 }
 
 function planCheckpoint(board){
-  const copy=JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next});
+  const copy=planUndoState(board);
   board.history=board.history||[];
   if(board.history.at(-1)!==copy)board.history.push(copy);
   if(board.history.length>30)board.history.shift();
 }
+/* A checkpoint is taken when a field gets focus, before anything changes, so
+   the newest one is often what the board already shows; undo skips those. */
+function planUndoState(board){return JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next})}
+function planCanUndo(board){const now=planUndoState(board);return Boolean(board.history?.some(h=>h!==now))}
 function planUndo(board){
   if(board.busy||!board.history?.length)return;
+  const now=planUndoState(board);
+  while(board.history.length&&board.history.at(-1)===now)board.history.pop();
+  if(!board.history.length){planRender(board);return}
   Object.assign(board,JSON.parse(board.history.pop()));planRender(board);
 }
 function planMarkFields(board){
@@ -6936,7 +6982,7 @@ function planMutationPath(x,kind){
   if(kind==='project')return {mode:admin||before.owner===S.user.id?'direct':'none',note:tr('只有管理员或 Owner 可以管理此项目')};
   const p=S.projects.find(p=>p.id===before.projectId);
   const assignees=p?projectAssignees(p).map(u=>u.id):S.users.filter(u=>u.active&&!u.admin).map(u=>u.id);
-  if(op==='delete')return {mode:admin&&!before.fixed&&!before.repeatId&&!['pending_approval','awaiting_approval','submitted'].includes(before.status)?'direct':'none',assignees,note:tr('仅管理员可删除普通任务；固定安排请挖空本次，待审批任务先完成审批')};
+  if(op==='delete')return {mode:canDeleteTask(before)?'direct':'none',assignees,note:tr('你没有删除这项任务的权限；固定安排请挖空本次，待审批任务先完成审批')};
   if(['done','deferred','skipped','pending_approval','rejected'].includes(before.status))return {mode:'none',assignees,note:tr('已归档或待审批任务不可调整')};
   if(before.projectId&&p?.status!=='active')return {mode:'none',assignees,note:tr('只能调整进行中项目的任务')};
   const direct=admin||(before.projectId?p?.owner===S.user.id:before.creator===S.user.id||before.creator==null&&before.assignee===S.user.id);
@@ -6954,7 +7000,7 @@ function planMutationHTML(board,x,kind){
   let body='';
   if(op==='delete'){
     const impact=project?tr('同时删除 {0} 项任务、{1} 个附件、{2} 条固定安排、{3} 场会议、{4} 条沟通记录及相关记录，删除后不可恢复。',Number(x.impact?.tasks)||0,Number(x.impact?.files)||0,Number(x.impact?.repeats)||0,Number(x.impact?.meetings)||0,Number(x.impact?.messages)||0):tr('任务将从日历移除；此操作不可撤销。');
-    body=`<strong class="plan-target">${escapeHTML(x.before?.name||x.name)}</strong><p class="plan-delete-impact">${impact}</p>`+(project?`<label class="plan-delete-confirm">${tr('输入完整项目名以确认')}<input data-f="confirm" autocomplete="off" value="${escapeHTML(x.confirm||'')}" placeholder="${escapeHTML(x.before?.name||tr('项目名称'))}"></label>`:`<label class="plan-delete-confirm"><input type="checkbox" data-f="deleteConfirmed"${x.deleteConfirmed?' checked':''}>${tr('我确认删除这项任务')}</label>`);
+    body=`<strong class="plan-target">${escapeHTML(x.before?.name||x.name)}</strong><p class="plan-delete-impact">${impact}</p>`+(project?`<label class="plan-delete-confirm">${tr('输入完整项目名以确认')}<input data-f="confirm" autocomplete="off" value="${escapeHTML(x.confirm||'')}" placeholder="${escapeHTML(x.before?.name||tr('项目名称'))}"></label>`:'');
   }else{
     body=`<p class="plan-target">${tr('正在修改：{0}',escapeHTML(x.before?.name||''))}</p><input class="plan-title" data-f="name" value="${escapeHTML(x.name)}" maxlength="120" aria-label="${tr('{0}名称',project?tr('项目'):tr('任务'))}"><textarea class="plan-desc" data-f="desc" rows="2" aria-label="${tr('说明')}">${escapeHTML(x.desc)}</textarea><div class="plan-grid">`;
     if(project){
@@ -7048,7 +7094,7 @@ function planRender(board,entering=false){
     el.innerHTML=head+`<div class="plan-foot is-closed"><span class="plan-sum">${escapeHTML(board.closedNote||tr('未处理的卡片已保留'))}</span><button type="button" class="ghost-btn plan-reopen">${tr('重新打开')}</button></div>`;
   }else{
     const n=planTally(board),sum=[n.delete?tr('含 {0} 项删除',n.delete):'',n.wait?tr('{0} 项要等审批',n.wait):'',n.none?tr('{0} 项暂不能接受',n.none):''].filter(Boolean).join(' · ');
-    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${board.history?.length&&!board.busy?'':' disabled'}>${tr('撤销修改')}</button><button type="button" class="ghost-btn plan-copy">${tr('复制草稿')}</button>${board.conflict?tr('<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>'):''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||'')}</small></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">${tr('全选')}</label><span class="plan-select-count" role="status"></span><div class="plan-selection-actions"><button type="button" class="ghost-btn plan-reject-selected">${tr('拒绝所选')}</button><button type="button" class="primary-btn plan-accept-selected">${tr('接受所选')}</button></div></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+tr('<strong>本组卡片已处理完</strong></div>')}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${tr('{0}加一个任务',icon('plus'))}</button><span class="plan-sum">${tr('全部 {0} 项{1}{2}',open.length,sum?' · '+sum:'',board.saveError?' · '+escapeHTML(board.saveError):'')}</span><button type="button" class="ghost-btn plan-cancel">${open.length?tr('收起草稿'):tr('收起')}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?tr('正在接受…'):planConfirmLabel()}</button></div>`;
+    el.innerHTML=head+`<div class="plan-draft-tools"><button type="button" class="ghost-btn plan-undo"${planCanUndo(board)&&!board.busy?'':' disabled'}>${tr('撤销修改')}</button><button type="button" class="ghost-btn plan-copy">${tr('复制草稿')}</button>${board.conflict?tr('<button type="button" class="ghost-btn plan-restore">重新加载草稿</button>'):''}<small class="plan-save-status" role="status">${escapeHTML(board.saveError||'')}</small></div><div class="plan-selection"><label class="plan-select-label"><input type="checkbox" class="plan-select-all">${tr('全选')}</label><span class="plan-select-count" role="status"></span></div><div class="plan-cards${entering?' is-entering':''}">${planCardsHTML(board)||'<div class="plan-empty">'+icon('check')+tr('<strong>本组卡片已处理完</strong></div>')}</div><div class="plan-foot"><button type="button" class="ghost-btn plan-add">${tr('{0}加一个任务',icon('plus'))}</button><span class="plan-sum">${tr('全部 {0} 项{1}{2}',open.length,sum?' · '+sum:'',board.saveError?' · '+escapeHTML(board.saveError):'')}</span><button type="button" class="ghost-btn plan-reject-selected"${open.length&&!board.busy?'':' disabled'}>${tr('全部拒绝')}</button><button type="button" class="primary-btn plan-confirm"${open.length&&!board.busy?'':' disabled'}>${board.busy?tr('正在接受…'):planConfirmLabel()}</button></div>`;
     el.querySelectorAll('input,textarea,select,button').forEach(field=>{field.disabled=Boolean(board.busy)||field.disabled});
     planMarkFields(board);planUpdateSelection(board);
     if(entering)el.querySelectorAll('.plan-card').forEach((c,i)=>c.style.setProperty('--i',String(i)));
@@ -7060,7 +7106,7 @@ function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
   el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length;planScheduleSave(board)}});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);planScheduleSave(board)}});
   el.addEventListener('change',e=>{
     const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
     planScheduleSave(board);
@@ -7068,14 +7114,14 @@ function planBind(board){
     if(e.target.hasAttribute('data-plan-select')&&x){x.selected=e.target.checked;planUpdateSelection(board);return}
     if(!f||!x)return;
     if(!['name','desc','reason','confirm'].includes(f))planCheckpoint(board);
-    x[f]=f==='deleteConfirmed'?e.target.checked:f==='duration'?Number(e.target.value):e.target.value;x.error='';
+    x[f]=f==='duration'?Number(e.target.value):e.target.value;x.error='';
     if(f==='start'&&x.end&&x.end<x.start)x.end='';
     if(f==='end'&&x.ref!=null&&planOperation(x)==='update')x.cycle=x.end?(x.before?.cycle==='infinite'?'range':x.before?.cycle||'range'):'infinite';
     if(f==='owner')x.members=x.members.filter(id=>id!==x.owner);
     // A blur-triggered change must not replace the button under pointerdown.
     // Rebuild only when the available people/project controls actually change.
     if(['owner','project'].includes(f))planRender(board);
-    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!board.history?.length;}
+    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);}
   });
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
@@ -7086,8 +7132,7 @@ function planBind(board){
     if(b.classList.contains('plan-reload')&&x)return planReload(board,x);
     if(b.classList.contains('plan-accept')&&x)return planSubmit(board,[x]);
     if(b.classList.contains('plan-reject')&&x)return planReject(board,[x]);
-    if(b.classList.contains('plan-accept-selected'))return planSubmit(board,planSelectedCards(board));
-    if(b.classList.contains('plan-reject-selected'))return planReject(board,planSelectedCards(board));
+    if(b.classList.contains('plan-reject-selected'))return planReject(board,planSelectedCards(board).length?planSelectedCards(board):planOpenCards(board));
     if(x)planCheckpoint(board);
     if(b.classList.contains('plan-remove')&&x)return planRemove(board,x);
     if(b.classList.contains('plan-person')&&x){const id=b.dataset.user;x.members=x.members.includes(id)?x.members.filter(m=>m!==id):[...x.members,id];if(planOperation(x)==='update'){const old=Object.keys(x.before.members||{}).filter(id=>id!==x.owner);x.addMembers=x.members.filter(id=>!old.includes(id));x.removeMembers=old.filter(id=>!x.members.includes(id));}return planRender(board)}
@@ -7095,7 +7140,7 @@ function planBind(board){
     if(b.classList.contains('plan-add'))return planAddTask(board);
     if(b.classList.contains('plan-cancel')){board.closed=true;board.closedNote=board.closedNote||tr('未处理的卡片已保留');return planRender(board)}
     if(b.classList.contains('plan-reopen')){planActivate(board);return planRender(board)}
-    if(b.classList.contains('plan-confirm'))planSubmit(board);
+    if(b.classList.contains('plan-confirm'))planSelectedCards(board).length?planSubmit(board,planSelectedCards(board)):planSubmit(board);
   });
 }
 function planRemove(board,x){return planReject(board,[x])}
@@ -7127,7 +7172,7 @@ async function planSubmit(board,items=null){
     try{
       let changes=planChanges(x,kind);
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
-      const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.deleteConfirmed?x.before.name:''):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
+      const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.before.name):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
       results[pending?'approval':op]++;board.history=[];
       if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});

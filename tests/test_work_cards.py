@@ -90,11 +90,14 @@ class WorkCardTests(unittest.TestCase):
         self.assertFalse(any(r['id']==p['id'] for r in self.store.all('projects')))
         self.assertFalse(any(r['id']==t['id'] for r in self.store.all('tasks')))
 
-    def test_member_cannot_delete_task_or_manage_another_owners_project(self):
-        p=self.make_project();t=self.task('自己的任务');self.store.db.commit()
+    def test_member_deletes_only_own_temporary_tasks_and_never_another_owners_project(self):
+        p=self.make_project();t=self.task('别人指派的任务',creator='superadmin');self.store.db.commit()
         with self.assertRaises(Problem):self.preview('project','delete',user=self.member,id=p['id'])
         card=self.preview('task','delete',user=self.member,id=t['id'])
         with self.assertRaises(Problem):self.apply('task',card,user=self.member,confirm=t['name'])
+        own=self.task('自己建的任务',creator='mate');self.store.db.commit()
+        self.apply('task',self.preview('task','delete',user=self.member,id=own['id']),user=self.member,confirm=own['name'])
+        self.assertFalse(any(r['id']==own['id'] for r in self.store.all('tasks')))
         fixed=self.task('固定任务',fixed=True);self.store.db.commit()
         with self.assertRaises(Problem):self.apply('task',self.preview('task','delete',id=fixed['id']),confirm=fixed['name'])
 
@@ -143,3 +146,37 @@ class WorkCardTests(unittest.TestCase):
         with self.assertRaises(Problem):self.apply('project',card)
         self.assertEqual(self.store.get('projects',p['id'])['name'],p['name'])
         with self.assertRaises(Problem):self.preview('project','update',id=p['id'],members=['outsider'])
+
+
+class AgentIssueRegressionTests(unittest.TestCase):
+    setUp = support.AgentWorkspaceTests.setUp
+    tearDown = support.AgentWorkspaceTests.tearDown
+    task = support.AgentWorkspaceTests.task
+    workspace = support.AgentWorkspaceTests.workspace
+    preview = WorkCardTests.preview
+    chat = support.AgentWorkspaceTests.chat
+
+    def test_query_pages_accept_string_numbers_and_oversized_limits(self):
+        for i in range(3):self.task('任务'+str(i))
+        self.store.db.commit()
+        result=self.workspace().query({'sql':'SELECT id FROM tasks ORDER BY id','limit':'500','offset':'1'})
+        self.assertEqual(result['shown'],2);self.assertEqual(result['offset'],1)
+
+    def test_a_large_delete_batch_fits_one_draft(self):
+        ids=[self.task('批量任务'+str(i),desc='很长的说明'*200)['id'] for i in range(60)];self.store.db.commit()
+        cards=self.store.action(self.admin,'work.cards.preview',{'tasks':[{'operation':'delete','id':i} for i in ids]})['tasks']
+        self.assertEqual(len(cards),60);self.assertNotIn('desc',cards[0]['before'])
+
+    def test_a_failed_query_tells_the_model_the_tool_is_there(self):
+        answers=iter([support.calls(support.tool('workspace_query',{'sql':'SELECT nope FROM tasks'},'bad')),support._chat('改好再查。')])
+        self.chat(lambda request:next(answers))
+        reply=json.loads(json.loads(self.seen[1].data)['messages'][-1]['content'])
+        self.assertTrue(reply['toolAvailable']);self.assertIn('error',reply)
+        policy=json.loads(self.seen[0].data)['messages'][0]['content']
+        self.assertIn('工具本身始终可用',policy)
+
+    def test_planning_policy_keeps_deletes_as_deletes(self):
+        self.chat(support._chat('好的'),planning=True)
+        policy=json.loads(self.seen[0].data)['messages'][0]['content']
+        self.assertIn('绝不能起草一张名为「删掉X」的新任务',policy)
+
