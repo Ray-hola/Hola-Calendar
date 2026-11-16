@@ -10810,8 +10810,8 @@ body.is-resizing-agent { user-select: none; }
 .plan-pick { min-width: 36px; min-height: 36px; justify-content: center; margin: -8px -5px -8px -8px; flex-shrink: 0; }
 .plan-select-label { min-height: 36px; padding: 0 4px; }
 .plan-save-status { color: var(--muted); font-size: 11px; }
-.agent-message.agent-intent { display: grid; gap: 10px; max-width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
-.agent-intent p { margin: 0; line-height: 1.6; }
+.agent-message.agent-manage-offer { display: grid; gap: 10px; max-width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.agent-manage-offer p { margin: 0; line-height: 1.6; }
 .agent-intent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .plan-foot .plan-sum { min-width: 70px; font-size: 11px; }
 .agent-action-fields { margin: 0; display: grid; gap: 8px; }

@@ -49,8 +49,10 @@ class WorkspaceError(Exception):
 def page_number(value, default):
     if value is None or value == '':
         return default
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        digits = value.strip()
+        if digits.isascii() and digits.isdecimal():
+            return int(digits.lstrip('0')[:12] or '0')
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return value

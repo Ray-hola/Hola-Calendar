@@ -1044,11 +1044,11 @@ test('管理任务 / 项目 is a mode: switching it on never sends, and it stays
   assert.ok(/agentState\.plan=!agentState\.plan/.test(toggle), '点一下切换模式');
   assert.ok(/input\.value=intent\.body/.test(toggle), '手打的前缀点一下就取下来');
 
-  const submit = source.match(/async function agentSubmit\(asking=false\)\{[\s\S]*?\n\}/)[0];
-  assert.ok(/if\(intent\.plan\|\|agentState\.plan\)\{input\.value='';return agentPlanSubmit\(intent\.body\)\}/.test(submit),
+  const submit = source.match(/async function agentSubmit\(asking=false,offeredText\)\{[\s\S]*?\n\}/)[0];
+  assert.ok(/if\(!asking&&\(intent\.plan\|\|agentState\.plan\)\)return agentPlanSubmit\(intent\.body\)/.test(submit),
     '模式打开或带前缀时，发送转到起草，且不关掉模式');
   assert.ok(/agentManageIntent\(text\)&&agentOfferManage\(text\)/.test(submit), '模式外的管理请求先问一句');
-  assert.ok(/async function agentPlanSubmit\(body\)/.test(source),
+  assert.ok(/async function agentPlanSubmit\(body,preserveInput=false\)/.test(source),
     '规划以正文为参数，不再自己去读输入框');
 });
 
@@ -2200,8 +2200,28 @@ test('the assistant may delete exactly what its user may delete',()=>{
 });
 test('management requests outside the mode are recognised, questions are not',()=>{
   const a=planningApp();
-  for(const t of ['把我未完成的临时任务全都删掉','帮我把陈曦的临时任务都删掉','新建一个任务：周五交周报','把评审改到下周一'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),true,t);
-  for(const t of ['今天有哪些任务要交','这周完成了多少任务','你好'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),false,t);
+  for(const t of ['把我未完成的临时任务全都删掉','帮我把陈曦的临时任务都删掉','新建一个任务：周五交周报','把评审改到下周一','请删除几个过期任务','帮我创建一个名为「什么是交付」的任务'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),true,t);
+  for(const t of ['今天有哪些任务要交','这周完成了多少任务','请列出哪些任务被删除了','你好'])assert.equal(a.run(`agentManageIntent(${JSON.stringify(t)})`),false,t);
+});
+test('a management offer preserves history and later text, and expires with its conversation',()=>{
+  const a=planningApp(),input={value:'Another draft'};
+  let offer,activate;
+  const selectors=[];
+  const list={querySelector(s){selectors.push(s);return offer},appendChild(el){offer=el;el.isConnected=true}};
+  a.context.document={
+    querySelector:s=>s==='#agentMessages'?list:s==='#agentInput'?input:null,
+    createElement:()=>({setAttribute(){},addEventListener(_,fn){activate=fn},
+      remove(){this.isConnected=false;offer=null},querySelector(){return null}})
+  };
+  a.run(`var replies=[];agentState.conversationId='first';agentPlanSubmit=(...args)=>replies.push(args);
+    agentSubmit=(...args)=>replies.push(args);`);
+  const choose=intent=>activate({target:{closest:()=>({dataset:{intent}})}});
+  a.run("agentOfferManage('删除任务')");choose('ask');
+  assert.deepEqual(a.json('replies'),[[true,'删除任务']]);
+  assert.equal(input.value,'Another draft');
+  a.run("agentOfferManage('删除项目');agentState.conversationId='second'");choose('manage');
+  assert.equal(a.run('replies.length'),1);
+  assert.deepEqual(selectors,['.agent-manage-offer','.agent-manage-offer']);
 });
 test('draft saving serializes edits against the returned version and keeps stable IDs',async()=>{
   const a=planningApp(),pending=[],cache=new Map();a.context.document={querySelector:()=>null};a.context.clearTimeout=()=>{};a.context.localStorage={getItem:k=>cache.get(k)||null,setItem:(k,v)=>cache.set(k,v)};
@@ -2239,7 +2259,7 @@ test('persisting an edit sends the previous stored message as a durable branch a
   assert.equal(await a.run('agentPersistEdit()'),true);assert.equal(calls[0].data.messageId,'anchor');assert.equal(calls[0].data.conversationId,'thread');
 });
 test('planning failures preserve a modification request instead of manufacturing a create card',async()=>{
-  const a=planningApp(),input={value:'',focus(){}},messages={appendChild(){},scrollHeight:0};a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentMessages'?messages:null};a.context.AbortController=AbortController;
+  const a=planningApp(),input={value:'',focus(){}},messages={appendChild(){},querySelector(){return null},scrollHeight:0};a.context.document={querySelector:s=>s==='#agentInput'?input:s==='#agentMessages'?messages:null};a.context.AbortController=AbortController;
   a.run(`var boards=0;agentAppend=()=>({remove(){}});agentPlanBoard=()=>boards++;agentRequest=async()=>{throw Error('fixture failure')};agentState.messages=[];`);
   await a.run("agentPlanSubmit('删除昨天那个任务')");assert.equal(a.run('boards'),0);assert.equal(input.value,'删除昨天那个任务');
 });
