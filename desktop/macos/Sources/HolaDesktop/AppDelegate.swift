@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import HolaCore
 
 @main
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
@@ -60,12 +61,23 @@ import SwiftUI
 
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
         if NSApp.currentEvent?.type == .rightMouseUp { showMenu(sender); return }
-        if popover.isShown { popover.performClose(nil) } else {
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            // Becoming active gives the popover key status and brings up the Touch Bar.
-            NSApp.activate(ignoringOtherApps: true)
-            state.refreshIfStale()
-        }
+        if popover.isShown { popover.performClose(nil) } else { showPopover() }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem?.button, !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Becoming active gives the popover key status and brings up the Touch Bar.
+        NSApp.activate(ignoringOtherApps: true)
+        state.refreshIfStale()
+    }
+
+    /// `hola://connect?server=…` from the web app's 「连接桌面 App」: the address
+    /// is filled in on the 连接 screen and the popover opens for the person to confirm.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let server = urls.lazy.compactMap(ConnectLink.server(from:)).first else { return }
+        state.openConnectLink(server)
+        showPopover()
     }
 
     private func showMenu(_ sender: NSStatusBarButton) {

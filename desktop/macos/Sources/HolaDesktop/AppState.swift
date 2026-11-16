@@ -7,8 +7,20 @@ import ServiceManagement
 /// pomodoro, the style, launch-at-login. One instance, main-actor only.
 @MainActor final class AppState: ObservableObject {
     // Settings (UserDefaults; nothing secret)
-    @Published var serverText: String { didSet { defaults.set(serverText, forKey: "cn.hola.desktop.server") } }
+    /// What is typed on the 连接 screen.
+    @Published var serverText = ""
     @Published var username: String { didSet { defaults.set(username, forKey: "cn.hola.desktop.username") } }
+    /// The server this app talks to; nil until the first 连接.
+    @Published private(set) var server: ConnectedServer? {
+        didSet { defaults.set(server?.url.absoluteString, forKey: "cn.hola.desktop.server") }
+    }
+    /// Servers connected to before, newest first. Tokens stay in the Keychain.
+    @Published private(set) var servers: [SavedServer] {
+        didSet { defaults.set(ServerList.encode(servers), forKey: "cn.hola.desktop.servers") }
+    }
+    @Published private(set) var connecting = false
+    /// The 连接 screen over a known server: "连接新服务器", or a link from the web.
+    @Published private(set) var showConnect = false
     @Published var style: Style { didSet { defaults.set(style.rawValue, forKey: Style.defaultsKey) } }
 
     // Session + data
@@ -48,11 +60,19 @@ import ServiceManagement
     var user: User? { snapshot?.user }
     var openCount: Int { TodayFilter.openCount(tasks) }
     var nextTask: Task? { TodayFilter.next(in: tasks) }
-    var account: String { HolaAPI.normalize(serverText)?.absoluteString ?? serverText }
+    var account: String { server?.url.absoluteString ?? "" }
+    var connectScreen: Bool { showConnect || (!signedIn && server == nil) }
+    /// What the server is called here: the name it was remembered by, else its host.
+    var serverName: String {
+        guard let server else { return "" }
+        return servers.first { $0.url == server.url.absoluteString }?.name ?? server.info?.name ?? server.host
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        serverText = defaults.string(forKey: "cn.hola.desktop.server") ?? "http://127.0.0.1:4173"
+        // A server signed in to before this version is kept, so nobody has to sign in again.
+        server = defaults.string(forKey: "cn.hola.desktop.server").flatMap(HolaAPI.normalize).map { ConnectedServer(url: $0, info: nil) }
+        servers = ServerList.decode(defaults.data(forKey: "cn.hola.desktop.servers"))
         username = defaults.string(forKey: "cn.hola.desktop.username") ?? ""
         style = Style(rawValue: defaults.string(forKey: Style.defaultsKey) ?? "") ?? .anthropic
         pomodoro = Pomodoro.load(from: defaults)
@@ -64,16 +84,72 @@ import ServiceManagement
 
     // MARK: - Session
 
-    private func restoreSession() {
-        guard let url = HolaAPI.normalize(serverText), let t = Keychain.load(account: url.absoluteString) else { return }
+    /// Picks up the session kept in the Keychain for the current server, if any.
+    @discardableResult private func restoreSession() -> Bool {
+        guard let url = server?.url, let t = Keychain.load(account: url.absoluteString) else { return false }
         token = t; api = HolaAPI(baseURL: url); signedIn = true
+        if !servers.contains(where: { $0.url == url.absoluteString }) {
+            servers = ServerList.remember(SavedServer(url: url.absoluteString, name: server?.info?.name ?? "哗啦待办", username: username), in: servers)
+        }
         startPolling()
         Concurrency.Task { await refresh() }
+        return true
+    }
+
+    /// Checks the typed address and, when it is a 哗啦待办 server, makes it the
+    /// current one. A session kept for it is resumed; otherwise sign-in comes next.
+    func connect() async {
+        guard !connecting else { return }
+        connecting = true; notice = nil
+        defer { connecting = false }
+        do {
+            let (api, info) = try await HolaAPI.connect(serverText)
+            use(ConnectedServer(url: api.baseURL, info: info))
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    /// One click from the remembered list: no address check, no sign-out of the others.
+    func switchTo(_ saved: SavedServer) {
+        guard let url = HolaAPI.normalize(saved.url) else { return }
+        use(ConnectedServer(url: url, info: nil))
+    }
+
+    private func use(_ next: ConnectedServer) {
+        leaveServer()
+        server = next; showConnect = false; serverText = ""
+        if let saved = servers.first(where: { $0.url == next.url.absoluteString }) { username = saved.username }
+        if restoreSession() { notice = nil }
+    }
+
+    /// Stops talking to the current server but keeps its session in the Keychain.
+    private func leaveServer() {
+        stopPolling()
+        token = nil; api = nil; signedIn = false; snapshot = nil; tasks = []; lastSync = nil; offline = false
+        syncing = false; busy = []; notice = nil
+    }
+
+    func showConnectScreen() { showConnect = true; serverText = ""; notice = nil }
+    func cancelConnect() { if server != nil { showConnect = false; notice = nil } }
+
+    /// A `hola://connect` link only fills in the address: the person checks it and presses 连接.
+    func openConnectLink(_ url: URL) {
+        showConnect = true
+        serverText = url.absoluteString
+        notice = "来自网页的连接，确认地址无误后点「连接」"
+    }
+
+    /// Drops a remembered server and its kept session.
+    func forget(_ saved: SavedServer) {
+        if saved.url == server?.url.absoluteString { signOut(); server = nil }
+        Keychain.delete(account: saved.url)
+        servers = ServerList.forget(saved.url, in: servers)
     }
 
     func signIn(password: String) async {
         guard !syncing, !signedIn else { return }
-        guard let url = HolaAPI.normalize(serverText) else { notice = "服务器地址无效"; return }
+        guard let url = server?.url else { showConnect = true; return }
         guard !username.isEmpty, !password.isEmpty else { notice = "请输入账户和密码"; return }
         let client = HolaAPI(baseURL: url)
         syncing = true
@@ -81,6 +157,7 @@ import ServiceManagement
             let t = try await client.login(username: username, password: password)
             try Keychain.save(token: t, account: url.absoluteString)
             token = t; api = client; signedIn = true; notice = nil; offline = false
+            servers = ServerList.remember(SavedServer(url: url.absoluteString, name: server?.info?.name ?? serverName, username: username), in: servers)
             startPolling()
         } catch let e as APIError {
             notice = e.errorDescription
@@ -230,6 +307,14 @@ import ServiceManagement
         }
         refreshLaunchAtLogin()
     }
+}
+
+/// The server in use: its address and, once checked on 连接, what it said about itself.
+struct ConnectedServer: Equatable {
+    var url: URL
+    var info: ServerInfo?
+    var host: String { SavedServer(url: url.absoluteString, name: "", username: "").host }
+    var exposesPassword: Bool { ServerAddress.exposesPassword(url) }
 }
 
 /// `Task` is the to-do model in HolaCore; the concurrency type is reached through this alias.
