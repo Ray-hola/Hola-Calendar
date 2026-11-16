@@ -3542,12 +3542,21 @@ function appearanceChooserHTML(cls){
     +`${own?`<div class="palette-row" role="radiogroup" aria-label="${tr('配色')}">${Object.keys(THEMES[shown.theme].palettes).map(p=>paletteSwatchHTML(shown.theme,p,'palette-dot')).join('')}</div>`:''}</div>`;
 }
 function bindAppearanceChooser(root){
-  const pick=v=>{setAppearanceOverride(v);if(root.id==='accountMenu')renderAccountMenu()};
+  const pick=(value,selector)=>{
+    setAppearanceOverride(value);
+    if(root.id==='accountMenu'){renderAccountMenu();root.querySelector(selector)?.focus()}
+  };
   root.querySelectorAll('[data-appearance]').forEach(b=>b.onclick=()=>{
-    const theme=b.dataset.appearance,own=appearanceOverride();
-    pick(theme?{theme,palette:own?.theme===theme?own.palette:teamAppearance().theme===theme?teamAppearance().palette:null}:null);
+    const theme=b.dataset.appearance,own=appearanceOverride(),team=teamAppearance();
+    const value=theme?{theme,palette:own?.theme===theme?own.palette:team.theme===theme?team.palette:null}:null;
+    pick(value,`[data-appearance="${theme}"]`);
   });
-  root.querySelectorAll('.palette-dot').forEach(b=>{b.setAttribute('aria-checked',String(sameAppearance(currentAppearance(),{theme:b.dataset.pickTheme,palette:b.dataset.pickPalette})));b.classList.toggle('is-on',b.getAttribute('aria-checked')==='true');b.onclick=()=>pick({theme:b.dataset.pickTheme,palette:b.dataset.pickPalette})});
+  root.querySelectorAll('.palette-dot').forEach(b=>{
+    const {pickTheme:theme,pickPalette:palette}=b.dataset;
+    const on=sameAppearance(currentAppearance(),{theme,palette});
+    b.setAttribute('aria-checked',String(on));b.classList.toggle('is-on',on);
+    b.onclick=()=>pick({theme,palette},`.palette-dot[data-pick-palette="${palette}"]`);
+  });
 }
 function positionAccountMenu(){
   const menu=$('#accountMenu'),anchor=$('#workspaceSwitcher');
@@ -5767,7 +5776,8 @@ $('#workspaceSwitcher')?.addEventListener('click',()=>toggleAccountMenu());
 $('#workspaceSwitcher')?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleAccountMenu()}});
 document.addEventListener('click',e=>{
   const menu=$('#accountMenu');if(!menu||menu.classList.contains('hidden'))return;
-  if(e.target.closest('#accountMenu')||e.target.closest('#workspaceSwitcher'))return;
+  const path=e.composedPath();
+  if(path.includes(menu)||path.includes($('#workspaceSwitcher')))return;
   toggleAccountMenu(false);
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});
