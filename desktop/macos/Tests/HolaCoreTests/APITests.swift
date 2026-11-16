@@ -43,6 +43,8 @@ func apiTests() async {
         check(HolaAPI.normalize("https://todo.example.com/index.html?x=1")?.absoluteString, "https://todo.example.com")
         check(HolaAPI.normalize("") == nil)
         check(HolaAPI.normalize("http://") == nil)
+        check(HolaAPI.normalize("ftp://todo.example.com") == nil)
+        check(HolaAPI.normalize("https://user:password@todo.example.com") == nil)
     }
 
     await test("login sends the X-Work-Calendar header, no Origin, and reads the cookie") {

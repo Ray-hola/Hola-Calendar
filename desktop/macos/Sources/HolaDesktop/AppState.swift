@@ -31,6 +31,7 @@ import ServiceManagement
     @Published private(set) var launchAtLoginError: String?
 
     let defaults: UserDefaults
+    private var taskRevision = 0
     private var token: String?
     private var api: HolaAPI?
     private var pollTimer: Timer?
@@ -71,49 +72,57 @@ import ServiceManagement
     }
 
     func signIn(password: String) async {
+        guard !syncing, !signedIn else { return }
         guard let url = HolaAPI.normalize(serverText) else { notice = "服务器地址无效"; return }
         guard !username.isEmpty, !password.isEmpty else { notice = "请输入账户和密码"; return }
         let client = HolaAPI(baseURL: url)
-        syncing = true; defer { syncing = false }
+        syncing = true
         do {
             let t = try await client.login(username: username, password: password)
             try Keychain.save(token: t, account: url.absoluteString)
             token = t; api = client; signedIn = true; notice = nil; offline = false
             startPolling()
-            await refresh()
         } catch let e as APIError {
             notice = e.errorDescription
         } catch {
             notice = "无法保存登录状态：\(error.localizedDescription)"
         }
+        syncing = false
+        if signedIn { await refresh() }
     }
 
     func signOut() {
         let old = (api, token)
         stopPolling()
-        if let url = HolaAPI.normalize(serverText) { Keychain.delete(account: url.absoluteString) }
+        if let url = old.0?.baseURL { Keychain.delete(account: url.absoluteString) }
         token = nil; api = nil; signedIn = false; snapshot = nil; tasks = []; lastSync = nil; offline = false
+        syncing = false; busy = []; notice = nil
         if let a = old.0, let t = old.1 { Concurrency.Task { try? await a.logout(token: t) } }
     }
 
     // MARK: - Sync
 
     func refresh() async {
-        guard let api, let token, !syncing else { return }
-        syncing = true; defer { syncing = false }
+        guard let api, let token, !syncing, busy.isEmpty else { return }
+        let revision = taskRevision
+        syncing = true
+        defer { if self.api === api { syncing = false } }
         do {
             let s = try await api.state(token: token)
+            guard self.api === api, taskRevision == revision else { return }
             snapshot = s
             tasks = TodayFilter.tasks(in: s)
             lastSync = Date(); offline = false
             if notice?.hasPrefix("离线") == true { notice = nil }
         } catch APIError.unauthorized {
+            guard self.api === api else { return }
             // The session was closed server-side (expired, password changed, admin reset).
             signOut()
             notice = "登录已失效，请重新登录"
         } catch let e as APIError {
+            guard self.api === api else { return }
             if case .offline = e { offline = true } else { notice = e.errorDescription }
-        } catch { offline = true }
+        } catch { if self.api === api { offline = true } }
     }
 
     /// Called when the popover opens: refresh if the list is stale.
@@ -124,19 +133,24 @@ import ServiceManagement
 
     func complete(_ task: Task) async {
         guard let api, let token, let user, TodayFilter.canComplete(task, as: user), !busy.contains(task.id) else { return }
-        busy.insert(task.id); defer { busy.remove(task.id) }
+        busy.insert(task.id)
+        taskRevision += 1
         do {
             try await api.complete(task, token: token)
+            guard self.api === api else { return }
             if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].status = "done" }
+            tasks.sort { $0.isOpen && !$1.isOpen }
             notice = "「\(task.name)」已完成"
-            await refresh()
         } catch APIError.unauthorized {
+            guard self.api === api else { return }
             signOut(); notice = "登录已失效，请重新登录"
-        } catch let e as APIError {
-            // 403 (not mine / admin account) and 409 (already recorded) land here with the server's own words.
-            notice = e.errorDescription
-            await refresh()
-        } catch { notice = error.localizedDescription }
+            return
+        } catch {
+            guard self.api === api else { return }
+            notice = error.localizedDescription
+        }
+        busy.remove(task.id)
+        await refresh()
     }
 
     private func startPolling() {

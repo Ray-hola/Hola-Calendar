@@ -47,7 +47,10 @@ public final class HolaAPI: @unchecked Sendable {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
         if !s.contains("://") { s = "http://" + s }
-        guard var comps = URLComponents(string: s), let host = comps.host, !host.isEmpty else { return nil }
+        guard var comps = URLComponents(string: s), let host = comps.host, !host.isEmpty,
+              let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              comps.user == nil, comps.password == nil else { return nil }
+        comps.scheme = scheme
         comps.path = ""; comps.query = nil; comps.fragment = nil
         return comps.url
     }

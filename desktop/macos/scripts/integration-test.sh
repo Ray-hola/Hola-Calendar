@@ -41,7 +41,9 @@ OUT="$(HOLA_TOKEN="$TOKEN" "$CTL" today "$SERVER_URL")"
 echo "$OUT" | sed 's/^/       /'
 expect "seeded P0 task listed" "$OUT" "核验周轴与悬停"
 expect "open marker" "$OUT" "[ ]"
-TASK_ID="$(echo "$OUT" | awk '/^\[ \]/{print $2; exit}')"
+TASK_ID="$(echo "$OUT" | awk '/^\[ \] /{print $3; exit}')"
+
+[ -n "$TASK_ID" ] || { echo "no runnable fixture task"; exit 1; }
 
 echo "→ complete $TASK_ID"
 OUT="$(HOLA_TOKEN="$TOKEN" "$CTL" complete "$SERVER_URL" "$TASK_ID")"
@@ -57,7 +59,8 @@ echo "→ admin account cannot tick (403)"
 ADMIN="$(HOLA_PASSWORD="$(pw superadmin)" "$CTL" login "$SERVER_URL" superadmin --print-token)"
 OUT="$(HOLA_TOKEN="$ADMIN" "$CTL" today "$SERVER_URL")"
 expect "admin sees everyone's tasks" "$OUT" "测试任务完成与递延"
-OTHER="$(echo "$OUT" | awk '/^\[ \]/{print $2; exit}')"
+OTHER="$(echo "$OUT" | awk '/^\[ \] /{print $3; exit}')"
+[ -n "$OTHER" ] || { echo "no runnable admin fixture task"; exit 1; }
 OUT="$(HOLA_TOKEN="$ADMIN" "$CTL" complete "$SERVER_URL" "$OTHER" 2>&1 || true)"
 expect "403 message" "$OUT" "superadmin 账号仅用于"
 
