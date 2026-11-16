@@ -124,7 +124,7 @@ UNAUDITED_ACTIONS = ('formdraft.save', 'formdraft.delete', 'chat.list', 'chat.pr
 # and the reason "no limit at all" is not an option: a limit that is removed
 # here simply becomes a 413 there, with a worse message and no idea which turn
 # was at fault.
-MAX_MESSAGE_CHARS = 60_000
+MAX_MESSAGE_CHARS = 40_000
 MAX_TRANSCRIPT_CHARS = 40_000
 
 # Voice input.  Recognition is a separate service from the chat model: it is a

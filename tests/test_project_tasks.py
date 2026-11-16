@@ -89,9 +89,11 @@ class ProjectTaskTests(unittest.TestCase):
         p = self.store.get('projects', self.project['id']); p['status'] = 'done'; self.store.put('projects', p)
         with self.assertRaises(Problem): self.store.action(self.owner, 'task.delete', {'id': t['id']})
 
-    def test_members_still_cannot_delete_temporary_tasks(self):
-        t = self.store.action(self.mate, 'task.create', {'name': '临时', 'assignee': 'mate', 'date': self.day(1), 'time': '09:00', 'duration': 30})
-        with self.assertRaises(Problem): self.store.action(self.mate, 'task.delete', {'id': t['id']})
+    def test_members_delete_only_temporary_tasks_they_created(self):
+        mine = self.store.action(self.mate, 'task.create', {'name': '临时', 'assignee': 'mate', 'date': self.day(1), 'time': '09:00', 'duration': 30})
+        theirs = self.store.action(self.admin, 'task.create', {'name': '别人建的', 'assignee': 'mate', 'date': self.day(1), 'time': '10:00', 'duration': 30})
+        with self.assertRaises(Problem): self.store.action(self.mate, 'task.delete', {'id': theirs['id']})
+        self.store.action(self.mate, 'task.delete', {'id': mine['id']})
 
 
 if __name__ == '__main__':
