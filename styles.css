@@ -10874,6 +10874,14 @@ body.is-resizing-agent { user-select: none; }
 .agent-panel .agent-mic-btn { width: 32px; padding: 0; flex-shrink: 0; }
 .agent-panel .agent-header-actions { align-items: center; }
 .agent-panel .agent-header-actions > button { height: 28px; min-height: 28px; }
+@media (max-width: 460px) {
+  .agent-header { gap: 8px; }
+  .agent-header > :first-child,
+  .agent-header-actions,
+  .agent-model-slot { min-width: 0; }
+  .agent-header strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-header-actions > button { flex-shrink: 0; white-space: nowrap; }
+}
 .plan-save-status:empty, .plan-board-head > span:empty, .plan-note:empty { display: none; }
 .plan-draft-tools { margin: 10px 0; }
 
@@ -16197,6 +16205,10 @@ body.is-resizing-agent { user-select: none; }
   border: 1px dashed var(--line);
   background: transparent;
   box-shadow: none;
+}
+
+[data-theme="tempo"] .settings-search {
+  background: var(--surface);
 }
 
 [data-theme="tempo"] .settings-search:focus-within,
