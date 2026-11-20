@@ -2549,6 +2549,52 @@ test('week history retains deferral events after completion without treating mer
   a.run("UI.member='member'");assert.deepEqual(a.json('[...weekDeferralCounts()]'),[['2026-11-03',1]]);
 });
 
+test('dialogs expose their visible title and initially focus the requested field', () => {
+  const a=app(),focused=[];
+  const control=(id,autofocus=false)=>({id,focus(){focused.push(id)},hasAttribute:name=>name==='autofocus'&&autofocus,
+    closest:()=>null,getClientRects:()=>[{}]});
+  const close=control('close'),project=control('project'),name=control('task-name',true),title={id:'taskDialogTitle'};
+  const content={querySelector:()=>title,querySelectorAll:()=>[project,name]};
+  const dialog={attrs:{},setAttribute(key,value){this.attrs[key]=value},removeAttribute(key){delete this.attrs[key]},
+    querySelectorAll:()=>[close,project,name],focus(){focused.push('dialog')}};
+  a.context.dialog=dialog;a.context.content=content;
+  a.run("prepareDialog(dialog,content,'modalTitle');focusDialog(dialog,content)");
+  assert.equal(dialog.attrs['aria-labelledby'],'taskDialogTitle');
+  assert.equal(dialog.attrs.tabindex,'-1');assert.deepEqual(focused,['task-name']);
+  title.id='';a.run("prepareDialog(dialog,content,'modalTitle')");
+  assert.equal(title.id,'modalTitle');assert.equal(dialog.attrs['aria-labelledby'],'modalTitle');
+});
+
+test('Tab stays inside the top dialog and wraps in both directions', () => {
+  const a=app(),focused=[];
+  const control=id=>({id,focus(){focused.push(id)},hasAttribute:()=>false,closest:()=>null,getClientRects:()=>[{}]});
+  const close=control('close'),name=control('task-name'),save=control('save'),controls=[close,name,save];
+  const dialog={querySelectorAll:()=>controls,contains:el=>controls.includes(el),focus(){focused.push('dialog')}};
+  const layer=hidden=>({classList:{contains:key=>key==='hidden'&&hidden}});
+  const modalBackdrop=layer(false),drawerBackdrop=layer(true);
+  const outside=control('background');
+  a.context.document={activeElement:save,querySelector:selector=>({
+    '#modalBackdrop .modal':dialog,'#modalBackdrop':modalBackdrop,'#taskDrawer .task-drawer':null,'#taskDrawer':drawerBackdrop
+  })[selector]||null};
+  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:false,preventDefault(){this.defaultPrevented=true}};
+  a.run('dialogKeydown(event)');assert.deepEqual(focused,['close']);
+  a.context.document.activeElement=close;a.context.event.defaultPrevented=false;a.context.event.shiftKey=true;
+  a.run('dialogKeydown(event)');assert.deepEqual(focused,['close','save']);
+  a.context.document.activeElement=outside;a.context.event.defaultPrevented=false;a.context.event.shiftKey=false;
+  a.run('dialogKeydown(event)');assert.deepEqual(focused,['close','save','close']);
+  assert.equal(a.context.event.defaultPrevented,true);
+});
+
+test('modal actions remain reachable and overflowing panels expose their scrollbars', () => {
+  const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');
+  const footer=css.match(/\.modal-footer \{([\s\S]*?)\}/)?.[1]||'';
+  assert.match(footer,/position:\s*sticky/);assert.match(footer,/bottom:\s*0/);assert.match(footer,/background:\s*var\(--surface\)/);
+  for(const selector of ['.modal {','.task-drawer {']){
+    const block=css.match(new RegExp(`\\${selector.replace(' ','\\s*')}([\\s\\S]*?)\\}`))?.[1]||'';
+    assert.match(block,/scrollbar-width:\s*thin/);assert.match(block,/overscroll-behavior:\s*contain/);
+  }
+});
+
 test('Escape closes the top task overlay while typing and restores its opener without closing the layer below', () => {
   const a=app(),elements={};let focused='';
   const element=(id,hidden=false)=>elements[id]||(elements[id]={isConnected:true,innerHTML:'',classList:{
