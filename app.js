@@ -2422,7 +2422,8 @@ const dragTypes=e=>[...(e.dataTransfer?.types||[])];
 const dropIsUpload=e=>{const t=dragTypes(e);return t.includes('Files')&&!t.includes('text/uri-list')};
 /* What the browser would open in place of the app: a file anywhere, a link outside a text field. */
 const dropWouldLeave=e=>{const t=dragTypes(e);
-  return dropIsUpload(e)||t.includes('text/uri-list')&&!e.target?.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])')};
+  const el=e.target?.nodeType===3?e.target.parentElement:e.target;
+  return dropIsUpload(e)||t.includes('text/uri-list')&&!el?.closest?.('input:not([type=checkbox],[type=radio],[type=button],[type=submit],[type=range],[type=file]),textarea,[contenteditable]:not([contenteditable="false"])')};
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
   const end=S.projects.find(p=>p.id===t.projectId)?.end,beyond=Boolean(end&&t.date>end);
