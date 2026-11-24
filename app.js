@@ -7420,11 +7420,11 @@ async function planSubmit(board,items=null){
       const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.before.name):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
       results[pending?'approval':op]++;
-      if(kind==='project'&&op==='create'){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+      if(kind==='project'&&op==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
         board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
       planSettleHistory(board);
-    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;planSettleHistory(board)}}catch(_){}}}
+    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{
