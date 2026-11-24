@@ -1574,6 +1574,29 @@ test('a background save receipt preserves newer edits and allows retry after a f
   assert.equal(a.run('project.background'),'版本 B');
 });
 
+test('files dragged in from another app upload anywhere in the project space, folders and archives aside (#117)',()=>{
+  const a=app(),elements={};
+  const node=()=>({dataset:{},classList:{on:new Set(),toggle(c,v){v?this.on.add(c):this.on.delete(c)}},contains:()=>false});
+  a.context.document={querySelector:s=>elements[s]||(elements[s]=node()),querySelectorAll:()=>[]};
+  a.run(`var uploads=[],toasts=[];uploadProjectFiles=(p,files)=>uploads.push([p.id,files.map(f=>f.name)]);toast=m=>toasts.push(m);
+    S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.files=[];S.tasks=[];
+    S.projects=[{id:'live',name:'进行中',owner:'test001',status:'active',members:{test001:'accepted'}}];
+    S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
+    UI.space='live';renderProjects();`);
+  const space=elements['#projectSpace'],event=(types,extra={})=>({dataTransfer:{types,dropEffect:'',files:[],items:[],...extra},prevented:false,preventDefault(){this.prevented=true}});
+  const inside=event(['text/plain']);space.ondragover(inside);
+  assert.equal(inside.prevented,false,'moving a task row inside the app is not an upload');
+  const over=event(['Files']);space.ondragover(over);
+  assert.ok(over.prevented&&over.dataTransfer.dropEffect==='copy'&&space.classList.on.has('is-over'));
+  const dir={kind:'file',webkitGetAsEntry:()=>({isDirectory:true})},file={kind:'file',webkitGetAsEntry:()=>({isDirectory:false})};
+  space.ondrop(event(['Files'],{files:[{name:'方案.pdf'},{name:'素材'}],items:[file,dir]}));
+  assert.ok(!space.classList.on.has('is-over'));
+  assert.deepEqual(a.json('uploads'),[['live',['方案.pdf']]]);
+  assert.equal(a.json('toasts').length,1,'a dropped folder is said, not silently dropped');
+  a.run(`UI.space='old';renderProjects();`);
+  assert.equal(space.ondrop,null,'an archive takes no drop');
+});
+
 test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
   const a=app(),elements={};
   a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};

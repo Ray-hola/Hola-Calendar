@@ -2390,11 +2390,23 @@ function bindProjectSpace(p){
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
   $$('#projectSpace [data-open-file]').forEach(b=>b.onclick=()=>openProjectFile(p,b.dataset.openFile));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=()=>deleteProjectFile(p,b.dataset.file,b));
-  const zone=$('#spaceFiles');if(!zone)return;
-  zone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();zone.classList.add('is-over')};
-  zone.ondragleave=e=>{if(!zone.contains(e.relatedTarget))zone.classList.remove('is-over')};
-  zone.ondrop=e=>{e.preventDefault();zone.classList.remove('is-over');uploadProjectFiles(p,e.dataTransfer.files)};
+  /* Files dragged in from another app upload wherever they land in the space,
+     on any tab; a space that cannot take uploads takes no drop either (#117). */
+  const zone=$('#projectSpace');if(!zone)return;
+  zone.classList?.toggle?.('is-over',false);
+  if(zone.dataset?.readonly==='true'){zone.ondragenter=zone.ondragover=zone.ondragleave=zone.ondrop=null;return}
+  zone.ondragenter=zone.ondragover=e=>{if(!dragHasFiles(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy';zone.classList.toggle('is-over',true)};
+  zone.ondragleave=e=>{if(!zone.contains(e.relatedTarget))zone.classList.toggle('is-over',false)};
+  zone.ondrop=e=>{
+    if(!dragHasFiles(e))return;
+    e.preventDefault();zone.classList.toggle('is-over',false);
+    const entries=[...(e.dataTransfer.items||[])].filter(i=>i.kind==='file'),isFolder=i=>Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory);
+    const files=[...e.dataTransfer.files].filter((f,i)=>!isFolder(i));
+    if(files.length<e.dataTransfer.files.length)toast(tr('文件夹不能直接上传，请拖入其中的文件'));
+    if(files.length)uploadProjectFiles(p,files);
+  };
 }
+const dragHasFiles=e=>[...(e.dataTransfer?.types||[])].includes('Files');
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
   const end=S.projects.find(p=>p.id===t.projectId)?.end,beyond=Boolean(end&&t.date>end);
@@ -5835,6 +5847,9 @@ document.addEventListener('click',e=>{
   toggleAccountMenu(false);
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});
+/* A file dropped where nothing takes it is not opened in place of the app. */
+document.addEventListener('dragover',e=>{if(!e.defaultPrevented&&dragHasFiles(e)){e.preventDefault();e.dataTransfer.dropEffect='none'}});
+document.addEventListener('drop',e=>{if(dragHasFiles(e))e.preventDefault()});
 document.addEventListener('keydown',e=>{
   if(UI.view!=='archive'||e.altKey||e.ctrlKey||e.metaKey||!$('#modalBackdrop').classList.contains('hidden'))return;
   if(e.target.closest('input,textarea,select,[contenteditable],.archive-ruler'))return;

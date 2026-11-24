@@ -468,6 +468,7 @@ var HOLA_I18N_EN={
   '「{0}」超过 {1}MB':'“{0}” is over {1}MB',
   '正在上传 {0} 个文件…':'Uploading {0} files…',
   '「{0}」上传未完成':'“{0}” didn’t finish uploading',
+  '文件夹不能直接上传，请拖入其中的文件':'Folders can’t be uploaded; drag in the files inside instead',
   '已上传 {0} 个文件':'Uploaded {0} files',
   '项目背景已保存':'Background saved',
   '已保存提交的版本，仍有未保存修改':'Submitted version saved; you still have unsaved changes',
