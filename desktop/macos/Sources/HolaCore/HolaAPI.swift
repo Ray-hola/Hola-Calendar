@@ -9,6 +9,10 @@ public enum APIError: Error, Equatable, LocalizedError {
     case server(Int, String)
     case badURL
     case badResponse
+    /// The address answered, but not as a 哗啦待办 server.
+    case notHola
+    /// The server speaks a newer API than this app knows.
+    case incompatible(Int)
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +21,8 @@ public enum APIError: Error, Equatable, LocalizedError {
         case .server(_, let s): return s
         case .badURL: return "服务器地址无效"
         case .badResponse: return "服务器返回了无法识别的内容"
+        case .notHola: return "这个地址不是哗啦待办服务器"
+        case .incompatible: return "服务器版本比这个 App 新，请先更新 App"
         }
     }
 }

@@ -995,6 +995,12 @@ select {
   gap: 7px;
 }
 
+/* A link doing a button's job (a download, the hola:// hand-off) looks like one. */
+a.primary-btn,
+a.secondary-btn {
+  text-decoration: none;
+}
+
 .primary-btn {
   background: var(--accent);
   color: var(--surface);
