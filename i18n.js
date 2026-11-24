@@ -2501,6 +2501,13 @@ var HOLA_I18N_EN={
   '还没有已结项的项目':'No finished projects yet',
   '成果库中的项目仅供读取，或你已无权访问该项目':'Projects in Achievements are read-only, or you no longer have access to this project',
   '只有 superadmin 可以删除临时任务':'Only superadmin can delete one-off tasks',
+  '这是删除请求，但模型返回了其他操作。未生成卡片，请重试或明确要删除的任务或项目。':'The assistant proposed a different operation, so no cards were created. Try again or specify the tasks or projects to delete.',
+  '这次工作台查询没有成功。请缩小范围后重试。':'The workspace query failed. Narrow the scope and try again.',
+  '工作台查询已执行，但本轮没有生成可用答复。请重试。':'The workspace query ran, but no answer was generated. Please try again.',
+  '本轮调用了未提供的工具。请重试。':'The assistant called a tool that was not provided. Please try again.',
+  '本轮没有生成可用答复，请补充信息后重试。':'No usable answer was generated. Add more detail and try again.',
+  '本轮未完成工作台查询。请重试。':'The workspace query was not completed. Please try again.',
+  '已驳回任务不能删除':'Rejected tasks cannot be deleted',
   '只能删除自己创建的临时任务':'You can only delete one-off tasks you created',
   '项目不在进行中，不能删除任务':'The project is not running, so its tasks cannot be deleted',
 };
