@@ -1211,6 +1211,9 @@ a.secondary-btn {
   width: var(--main-navigation-width, 248px);
   position: sticky;
   top: 0;
+  /* Sticky makes the sidebar its own stacking layer; above the page, the account
+     menu it holds is not covered where it reaches past its edge (#122). */
+  z-index: 30;
   height: 100vh;
   overflow-y: auto;
   scrollbar-width: none;
