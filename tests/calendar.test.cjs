@@ -1669,6 +1669,7 @@ test('a 成果库 project shows each task with ✅, its links and what the perso
   html=one('https://a.com/1,https://b.com/2');
   assert.equal(html.match(/<a /g).length,2,'two links written with a comma between are two links');
   assert.match(one('定稿见 https://a.com/f ，评审通过'),/王零说：定稿见，评审通过/);
+  assert.match(one('资料【https://a.com/x.】已归档'),/王零说：资料已归档/,'a bracket left holding only the link goes');
   html=one('（见 https://a.com/x.）调用 foo() 即可，比例 3 : 1');
   assert.match(html,/href="https:\/\/a\.com\/x"/,'the period before a closing bracket is not part of the link');
   assert.match(html,/王零说：（见.）调用 foo\(\) 即可，比例 3 : 1<\/p>/,'text away from the link is left as written');

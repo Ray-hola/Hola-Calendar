@@ -5226,7 +5226,7 @@ function achievementTaskHTML(t){
     if(!links.includes(url))links.push(url);return '\u0001'+tail;
   }).join(''))
     /* Only where a link came out: brackets left empty, and the space before it. */
-    .replace(/[（(]\s*\u0001\s*[）)]/g,'').replace(/\u0001[ \t]+(?=[，。；、！？：）」])/g,'\u0001').replace(/[ \t]*\u0001/g,'')
+    .replace(/[（(《【]\s*\u0001[.,;:!?。]*\s*[）)》】]/g,'').replace(/\u0001[ \t]+(?=[，。；、！？：）」》】』])/g,'\u0001').replace(/[ \t]*\u0001/g,'')
     .replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').trim();
   const name=who?nameOf(who):'—',said=tr(ACHIEVEMENT_SAID[t.completionFeeling]||'{0}说',name);
   const words=done&&(note||ACHIEVEMENT_SAID[t.completionFeeling])?`<p>${escapeHTML(note?tr('{0}：{1}',said,note):said)}</p>`:'';
