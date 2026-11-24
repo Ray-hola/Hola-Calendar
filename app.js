@@ -3647,11 +3647,14 @@ async function act(action,data,{quiet=false}={}){try{await api('/api/action',{ac
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
-const DIALOG_FOCUSABLES='button:not([disabled]),[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const DIALOG_FOCUSABLES=['button:not([disabled])','[href]','input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])','textarea:not([disabled])','[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]:not([tabindex="-1"])'].join(',');
 function dialogControls(root){
   return Array.from(root?.querySelectorAll?.(DIALOG_FOCUSABLES)||[]).filter(el=>{
     const rects=el.getClientRects?.();
-    return !el.closest?.('.hidden,[inert]')&&(!rects||rects.length);
+    if(el.closest?.('.hidden,[inert]')||rects&&!rects.length)return false;
+    return typeof getComputedStyle!=='function'||getComputedStyle(el).visibility!=='hidden';
   });
 }
 /* A modal owns the keyboard while it is open: name it from its visible heading,
@@ -3675,10 +3678,13 @@ function topOpenDialog(){
 }
 function dialogKeydown(e){
   if(e.key!=='Tab'||e.defaultPrevented)return;
+  // The assistant panel floats beside dialogs and keeps its own Tab order.
+  if(e.target?.closest?.('#agentPanel'))return;
   const dialog=topOpenDialog();if(!dialog)return;
   const controls=dialogControls(dialog),active=document.activeElement;
   if(!controls.length){e.preventDefault();dialog.focus?.({preventScroll:true});return}
-  const first=controls[0],last=controls[controls.length-1],outside=!dialog.contains?.(active);
+  // Focus on the dialog itself (after a click on its blank area) counts as outside its controls.
+  const first=controls[0],last=controls[controls.length-1],outside=active===dialog||!dialog.contains?.(active);
   if(e.shiftKey&&(outside||active===first)){e.preventDefault();last.focus()}
   else if(!e.shiftKey&&(outside||active===last)){e.preventDefault();first.focus()}
 }

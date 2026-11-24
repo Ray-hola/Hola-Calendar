@@ -2585,10 +2585,34 @@ test('Tab stays inside the top dialog and wraps in both directions', () => {
   assert.equal(a.context.event.defaultPrevented,true);
 });
 
+test('Tab from the dialog itself wraps, the assistant panel keeps its own Tab, hidden controls are skipped', () => {
+  const a=app(),focused=[];
+  const control=(id,extra={})=>({id,focus(){focused.push(id)},hasAttribute:()=>false,closest:()=>null,getClientRects:()=>[{}],...extra});
+  const close=control('close'),notes=control('notes'),ghost=control('ghost'),save=control('save');
+  const dialog={querySelectorAll:()=>[close,notes,ghost,save],contains:el=>[close,notes,ghost,save].includes(el),
+    focus(){focused.push('dialog')}};
+  const layer=hidden=>({classList:{contains:key=>key==='hidden'&&hidden}});
+  a.context.document={activeElement:dialog,querySelector:selector=>({
+    '#modalBackdrop .modal':dialog,'#modalBackdrop':layer(false),'#taskDrawer .task-drawer':null,'#taskDrawer':layer(true)
+  })[selector]||null};
+  a.context.getComputedStyle=el=>({visibility:el===ghost?'hidden':'visible'});
+  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:true,preventDefault(){this.defaultPrevented=true}};
+  a.run('dialogKeydown(event)');
+  assert.deepEqual(focused,['save'],'Shift+Tab from the dialog box goes to its last control');
+  assert.equal(a.run('dialogControls(document.querySelector("#modalBackdrop .modal")).map(x=>x.id).join()'),'close,notes,save');
+  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:false,target:{closest:s=>s==='#agentPanel'?{}:null},
+    preventDefault(){this.defaultPrevented=true}};
+  a.context.document.activeElement=control('agent-input');
+  a.run('dialogKeydown(event)');
+  assert.equal(a.context.event.defaultPrevented,false,'Tab inside the assistant panel is left alone');
+  assert.match(a.run('DIALOG_FOCUSABLES'),/\[contenteditable\]:not\(\[contenteditable="false"\]\)/);
+});
+
 test('modal actions remain reachable and overflowing panels expose their scrollbars', () => {
   const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');
   const footer=css.match(/\.modal-footer \{([\s\S]*?)\}/)?.[1]||'';
-  assert.match(footer,/position:\s*sticky/);assert.match(footer,/bottom:\s*0/);assert.match(footer,/background:\s*var\(--surface\)/);
+  assert.match(footer,/position:\s*sticky/);assert.match(footer,/bottom:\s*calc\(-1 \* var\(--modal-pad-bottom\)\)/);
+  assert.match(footer,/padding-bottom:\s*var\(--modal-pad-bottom\)/,'the footer covers the scroll padding below it');assert.match(footer,/background:\s*var\(--surface\)/);
   for(const selector of ['.modal {','.task-drawer {']){
     const block=css.match(new RegExp(`\\${selector.replace(' ','\\s*')}([\\s\\S]*?)\\}`))?.[1]||'';
     assert.match(block,/scrollbar-width:\s*thin/);assert.match(block,/overscroll-behavior:\s*contain/);
