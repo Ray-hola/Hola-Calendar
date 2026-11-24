@@ -1494,7 +1494,7 @@ test('incomplete AI cards preserve unknown people and projects for correction in
   assert.ok(a.run('Boolean(planProblems(board,board.tasks[0]).date&&planProblems(board,board.tasks[0]).time)'));
 });
 
-test('confirming incomplete cards writes nothing; corrected cards submit once and clear undo history',async()=>{
+test('confirming incomplete cards writes nothing; corrected cards submit once and undo cannot bring them back',async()=>{
   const a=planningApp(),writes=[];
   a.context.document={querySelector:()=>null};
   a.context.fetch=async(path,options)=>{writes.push(JSON.parse(options.body));return {ok:true,text:async()=>'{"id":"created"}'}};
@@ -1508,7 +1508,9 @@ test('confirming incomplete cards writes nothing; corrected cards submit once an
   assert.equal(writes[0].action,'work.card.apply');
   assert.equal(writes[0].data.kind,'task');
   assert.equal(writes[0].data.operation,'create');
-  assert.equal(a.run('board.history.length'),0,'已提交的卡片不能通过撤销变回未提交');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].state'),'done','已提交的卡片不能通过撤销变回未提交');
+  assert.equal(a.run('board.tasks[0].name'),'整理周报');
   await a.run('planSubmit(board)');
   assert.equal(writes.length,1,'已完成的卡片不重复提交');
 });
@@ -4550,4 +4552,117 @@ test('the theme is set before the stylesheet loads and the setting sits in 系�
   for (const name of ['Anthropic风', 'Tempo风', '原色', '暮色', '苔绿', '紫藤', '青灰', '纸墨', '磷光', '琥珀', '跟随团队', '外观'])
     assert.notEqual(en.run(`tr(${JSON.stringify(name)})`), name, `${name} has English`);
   assert.equal(en.run("appearanceName({theme:'tempo',palette:'phosphor'})"), 'Tempo style · Phosphor');
+});
+
+test('accepting one AI card keeps the undo steps of the others (#116)', async () => {
+  const a = planningApp(), writes = [];
+  a.context.document = {querySelector: () => null};
+  a.context.fetch = async (path, options) => {
+    writes.push(JSON.parse(options.body));
+    return {ok: true, text: async () => '{"id":"created"}'};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:'A',assignee:'test001'},{name:'B',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};
+    planCheckpoint(board);board.tasks[1].name='B 改过';`);
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(a.run('board.tasks[0].state'), 'done');
+  assert.equal(a.run('planCanUndo(board)'), true, '另一张卡的修改仍可撤销');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[1].name'), 'B');
+  assert.equal(a.run('board.tasks[0].state'), 'done', '已接受的卡片保持已接受');
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(writes.length, 1, '已接受的卡片不会再提交一次');
+});
+
+test('undo after accepting a hand-added card does not hand its key out again (#116)', async () => {
+  const a = planningApp();
+  a.context.fetch = async () => ({ok: true, text: async () => '{"id":"created"}'});
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:'A',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};
+    planAddTask(board);Object.assign(board.tasks[1],{name:'B',assignee:'test001'});`);
+  await a.run('planSubmit(board,[board.tasks[1]])');
+  a.run('planUndo(board);planAddTask(board)');
+  const keys = a.json('board.tasks.map(t=>t.key)');
+  assert.equal(new Set(keys).size, keys.length, keys.join());
+});
+
+test('a reloaded card keeps its id, so undo neither brings the old version back nor doubles it (#116)', async () => {
+  const a = planningApp(), sent = [];
+  a.context.fetch = async (path, options) => {
+    const body = JSON.parse(options.body);
+    sent.push(body);
+    if (body.action === 'work.cards.preview') {
+      const card = body.data.tasks[0];
+      return {ok: true, text: async () => JSON.stringify({tasks: [{...card, name: 'Fresh', cardId: card.cardId || 'server-new', revision: 'r2', operation: 'update',
+        before: {name: 'Fresh', assignee: 'test001', date: '2026-11-03'}, assignee: 'test001', date: '2026-11-03'}]})};
+    }
+    return {ok: true, text: async () => '{"id":"t9"}'};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{id:'t9',operation:'update',cardId:'card-1',revision:'r1',name:'Old',assignee:'test001',date:'2026-11-03',
+      before:{name:'Old',assignee:'test001',date:'2026-11-03'}}]}),el:{querySelector:()=>null},history:[]};
+    planCheckpoint(board);board.tasks[0].name='New';`);
+  await a.run('planReload(board,board.tasks[0])');
+  assert.equal(sent[0].data.tasks[0].cardId, 'card-1', 'the preview is asked for the same card');
+  assert.equal(a.run('board.tasks[0].cardId'), 'card-1');
+  a.run('planUndo(board)');
+  assert.deepEqual(a.json('board.tasks.map(t=>[t.name,t.revision])'), [['Fresh', 'r2']], '撤销不回到重新读取前的旧版本');
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  a.run('planUndo(board)');
+  assert.deepEqual(a.json('board.tasks.map(t=>[t.cardId,t.state])'), [['card-1', 'done']], '接受后撤销不出现重复卡片');
+});
+
+test('a card found applied after a lost response stays accepted through undo (#116)', async () => {
+  const a = planningApp();
+  a.context.fetch = async (path, options) => {
+    const body = JSON.parse(options.body);
+    if (body.action === 'work.card.apply') return {ok: false, status: 502, text: async () => '{"error":"网关超时"}'};
+    return {ok: true, text: async () => JSON.stringify({receipts: {cp: {id: 'p7'}}})};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({projects:[{ref:'P',name:'新项目',cardId:'cp'}],tasks:[{name:'A',assignee:'test001',projectRef:'P',cardId:'ct'}]}),
+      conversationId:'c1',draftId:'d1',el:{querySelector:()=>null},history:[]};
+    agentState.planBoard=board;agentState.conversationId='c1';planCheckpoint(board);board.tasks[0].name='A2';`);
+  await a.run('planSubmit(board,[board.projects[0]])');
+  assert.equal(a.run('board.projects[0].state'), 'done');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.projects[0].state'), 'done', '撤销后仍是已接受');
+  assert.equal(a.run('board.tasks[0].name'), 'A');
+  assert.equal(a.run('board.tasks[0].project'), 'id:p7', '旧步骤里的任务也跟着新建的项目');
+});
+
+test('ticking a card is not an undo step, and the undo button wakes up while a number is typed (#116)', () => {
+  const a = planningApp();
+  a.run(`var board={...planDraft({tasks:[{name:'A',assignee:'test001',duration:30}]}),history:[]};
+    planCheckpoint(board);board.tasks[0].selected=true;`);
+  assert.equal(a.run('planCanUndo(board)'), false, '只勾选没有可撤销的内容');
+  const listeners = {}, undo = {disabled: true};
+  const card = {dataset: {key: a.run('board.tasks[0].key')}};
+  const field = {dataset: {f: 'duration'}, value: '45', closest: s => (s === '.plan-card' ? card : null), hasAttribute: () => false};
+  a.context.el = {dataset: {}, addEventListener: (type, f) => {
+    listeners[type] = f;
+  }, querySelector: s => (s === '.plan-undo' ? undo : null), querySelectorAll: () => []};
+  a.run('board.el=el;planBind(board)');
+  listeners.focusin({target: field});
+  listeners.input({target: field});
+  assert.equal(a.run('board.tasks[0].duration'), 45);
+  assert.equal(undo.disabled, false, '还没离开输入框，撤销修改就能点');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].duration'), 30);
+  assert.equal(a.run('board.tasks[0].selected'), true, '撤销不动勾选');
+});
+
+test('the sidebar sits above the project space so the account menu is not covered (#122)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  const z = selector => Number(css.match(new RegExp(`(?:^|\\n)${selector} \\{[^}]*?z-index: (\\d+)`))?.[1]);
+  assert.ok(z('\\.sidebar') > z('\\.space-tabs'), 'above the sticky project tabs');
+  assert.ok(z('\\.sidebar') > z('\\.topbar'), 'and the top bar');
+});
+
+test('连接桌面 App hands this server’s own address to the desktop app as an encoded hola:// link', () => {
+  const a = app();
+  assert.equal(a.run("desktopConnectLink('https://work.example.com')"), 'hola://connect?server=https%3A%2F%2Fwork.example.com');
+  assert.equal(a.run("desktopConnectLink('http://192.168.1.8:4173')"), 'hola://connect?server=http%3A%2F%2F192.168.1.8%3A4173');
+  assert.match(source, /row\('desktop',tr\('连接桌面 App'\)/, 'every account sees it, not only admins');
+  assert.match(source, /action==='desktop'\)connectDesktopApp\(\)/);
 });

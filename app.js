@@ -3532,7 +3532,7 @@ function renderAccountMenu(){
   const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
-  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理')):''}${row('settings',tr('系统设置'))}</div>`;
+  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${row('desktop',tr('连接桌面 App'),tr('macOS'))}${S.user?.admin?row('accounts',tr('账户管理')):''}${row('settings',tr('系统设置'))}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
   menu.innerHTML=`${head}${mine}${switchGroup}${foot}`;
@@ -3593,9 +3593,27 @@ function accountMenuAction(action){
   toggleAccountMenu(false);
   if(action==='profile')editProfile(S.user.id,'self');
   else if(action==='password')changeOwnPassword();
+  else if(action==='desktop')connectDesktopApp();
   else if(action==='accounts')switchView('accounts');
   else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
+}
+/* 连接桌面 App: the macOS app connects to whatever server it is given, and
+   this page knows its own address, so it hands that over as a hola:// link.
+   The app only fills the address in; the person confirms and signs in there. */
+const DESKTOP_RELEASES='https://github.com/Ray-hola/Hola-Calendar/releases';
+const desktopConnectLink=origin=>`hola://connect?server=${encodeURIComponent(origin)}`;
+function connectDesktopApp(){
+  const origin=location.origin;
+  openModal(`<div class="eyebrow">${tr('桌面 App')}</div><h2>${tr('连接桌面 App')}</h2>`
+    +`<p class="muted">${tr('在 Mac 上装好哗啦待办桌面 App 后，点「在桌面 App 中打开」，它会填好这台服务器的地址，确认后登录即可。')}</p>`
+    +`<label class="form-field">${tr('服务器地址')}<input id="desktopServer" readonly value="${escapeHTML(origin)}"></label>`
+    +`<div class="modal-footer"><a class="secondary-btn" href="${DESKTOP_RELEASES}" target="_blank" rel="noopener">${tr('下载 macOS App')}</a>`
+    +`<button class="secondary-btn" id="copyDesktopServer">${tr('复制地址')}</button>`
+    +`<a class="primary-btn" id="openDesktopApp" href="${escapeHTML(desktopConnectLink(origin))}">${tr('在桌面 App 中打开')}</a></div>`);
+  $('#desktopServer').onfocus=e=>e.target.select();
+  // navigator.clipboard is missing on plain-http LAN addresses, so that case falls back too.
+  $('#copyDesktopServer').onclick=()=>(navigator.clipboard?.writeText?navigator.clipboard.writeText(origin):Promise.reject()).then(()=>toast(tr('地址已复制')),()=>{$('#desktopServer').select();toast(tr('请手动复制地址'))});
 }
 /* Passwords are typed into masked boxes, the new one twice: a slip nobody
    could see would otherwise only show at the next sign-in. */
@@ -7149,7 +7167,8 @@ async function planFlush(board){
 function planApplyReceipts(board,receipts){
   for(const x of board.projects.concat(board.tasks))if(receipts?.[x.cardId]){
     const r=receipts[x.cardId];x.state='done';x.selected=false;x.error='';x.result=r?.requested||r?.status==='pending'?tr('已提交申请'):tr('已接受');
-    if(x.ref!=null&&planOperation(x)==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+    if(x.ref!=null&&planOperation(x)==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+      board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
   }
 }
 async function agentRestoreBoard(raw,loading=false){
@@ -7176,14 +7195,45 @@ function planCheckpoint(board){
 }
 /* A checkpoint is taken when a field gets focus, before anything changes, so
    the newest one is often what the board already shows; undo skips those. */
-function planUndoState(board){return JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next})}
+/* Only what the cards say is kept: ticking a card or clearing its error is not a step to undo. */
+const planCardId=x=>String(x.cardId??x.ref??x.key);
+const planCardContent=({selected,error,result,...rest})=>rest;
+function planUndoState(board){
+  return JSON.stringify({projects:board.projects.map(planCardContent),tasks:board.tasks.map(planCardContent),next:board.next});
+}
 function planCanUndo(board){const now=planUndoState(board);return Boolean(board.history?.some(h=>h!==now))}
+function planSyncUndo(board){
+  const undo=board.el?.querySelector?.('.plan-undo');
+  if(undo)undo.disabled=Boolean(board.busy)||!planCanUndo(board);
+}
+/* A card accepted or sent (state done), or just reloaded, stays as it is now in
+   every earlier step, so undo still steps back the other cards' edits without
+   bringing it back. A rejected card can still be undone back to a draft. */
+function planSettleHistory(board,also=[]){
+  if(!board.history?.length)return;
+  const settled=board.projects.concat(board.tasks).filter(x=>x.state==='done'||also.includes(x));
+  const now=new Map(settled.map(x=>[planCardId(x),planCardContent(x)]));
+  board.history=board.history.map(h=>{
+    const step=JSON.parse(h);
+    for(const k of ['projects','tasks']){
+      const ids=new Set(step[k].map(planCardId));
+      step[k]=step[k].map(x=>now.get(planCardId(x))??x)
+        .concat(board[k].filter(x=>x.state==='done'&&!ids.has(planCardId(x))).map(planCardContent));
+    }
+    step.tasks=step.tasks.map(t=>board.refIds?.[t.project]?{...t,project:board.refIds[t.project]}:t);
+    step.next=Math.max(Number(step.next)||0,Number(board.next)||0);
+    return JSON.stringify(step);
+  });
+}
 function planUndo(board){
   if(board.busy||!board.history?.length)return;
   const now=planUndoState(board);
   while(board.history.length&&board.history.at(-1)===now)board.history.pop();
   if(!board.history.length){planRender(board);return}
-  Object.assign(board,JSON.parse(board.history.pop()));planRender(board);
+  const ui=new Map(board.projects.concat(board.tasks).map(x=>[planCardId(x),{selected:x.selected,error:x.error,result:x.result}]));
+  const step=JSON.parse(board.history.pop());
+  for(const k of ['projects','tasks'])step[k]=step[k].map(x=>({...x,...(ui.get(planCardId(x))??{})}));
+  Object.assign(board,step);planRender(board);
 }
 function planMarkFields(board){
   board.el.querySelectorAll('.plan-card').forEach(card=>{
@@ -7248,9 +7298,9 @@ async function planReload(board,x){
   const kind=x.ref!=null?'project':'task',op=planOperation(x),changes=op==='update'?planChanges(x,kind):{};
   board.busy=true;agentState.busy=true;planRender(board);agentUpdateBusy();
   try{
-    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op}]}});
+    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op,cardId:x.cardId}]}});
     const fresh=planDraft(raw)[kind+'s'][0];
-    Object.assign(x,fresh,kind==='project'?{ref:x.ref}:{key:x.key},{error:''});board.history=[];
+    Object.assign(x,fresh,{cardId:x.cardId},kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
   }catch(e){x.error=e?.message||tr('读取失败')}
   finally{board.busy=false;agentState.busy=false;planRender(board);agentUpdateBusy()}
 }
@@ -7332,8 +7382,11 @@ function planRender(board,entering=false){
 function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
-  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);planScheduleSave(board)}});
+  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy&&!e.target.hasAttribute?.('data-plan-select'))planCheckpoint(board)});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy||!x||!f)return;
+    if(['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);planSyncUndo(board);planScheduleSave(board);return}
+    // Numbers, dates and times only send change when they lose focus; 撤销修改 is ready as soon as they differ.
+    if(['duration','date','deadline','time','start','end'].includes(f)){x[f]=f==='duration'?Number(e.target.value):e.target.value;planSyncUndo(board)}});
   el.addEventListener('change',e=>{
     const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
     planScheduleSave(board);
@@ -7348,7 +7401,7 @@ function planBind(board){
     // A blur-triggered change must not replace the button under pointerdown.
     // Rebuild only when the available people/project controls actually change.
     if(['owner','project'].includes(f))planRender(board);
-    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);}
+    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);planSyncUndo(board);}
   });
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
@@ -7401,10 +7454,12 @@ async function planSubmit(board,items=null){
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
       const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.before.name):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
-      results[pending?'approval':op]++;board.history=[];
-      if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+      results[pending?'approval':op]++;
+      if(kind==='project'&&op==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+        board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
-    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;}}catch(_){}}}
+      planSettleHistory(board);
+    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{

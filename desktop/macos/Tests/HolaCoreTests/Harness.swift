@@ -37,6 +37,7 @@ func test(_ name: String, _ body: () async throws -> Void) async {
         await pomodoroTests()
         await todayFilterTests()
         await apiTests()
+        await connectTests()
         print("\(passed) checks passed, \(failed) failed")
         exit(failed == 0 ? 0 : 1)
     }
