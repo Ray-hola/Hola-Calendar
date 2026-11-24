@@ -27,11 +27,13 @@ desktop/
 
 ```bash
 cd desktop/macos
-scripts/build.sh            # 产出 build/哗啦待办.app（ad-hoc 签名）
+scripts/build.sh            # 产出 build/哗啦待办.app（通用二进制，Apple 芯片和 Intel 都能运行；ad-hoc 签名）
 scripts/build.sh test       # 单元测试
 scripts/build.sh run        # 构建并打开
 scripts/integration-test.sh # 端到端：临时起 server.py，登录、列今日、完成、核对 403/409
 ```
+
+另一种架构是交叉编译出来的，不需要 Rosetta。只想要本机架构时用 `ARCHS=arm64 scripts/build.sh`。`test` 和 `debug` 只构建本机架构。
 
 想常驻使用：把 `build/哗啦待办.app` 拖到「应用程序」再打开（SMAppService 开机自启在固定路径下最可靠）。
 
@@ -100,7 +102,7 @@ A native Swift menu-bar companion for a self-hosted 哗啦待办 / Hola-Calendar
 
 ```bash
 cd desktop/macos
-scripts/build.sh          # -> build/哗啦待办.app
+scripts/build.sh          # -> build/哗啦待办.app (universal: Apple silicon + Intel)
 scripts/build.sh test     # unit tests
 scripts/integration-test.sh   # spins up a throwaway server.py and exercises login/list/complete/refusals
 ```
