@@ -600,9 +600,9 @@ function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUN
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
-  let back='';
+  let back='',firstLoad=false;
   if(S.user?.id!==next.user.id){
-    try{back=!S.user&&sessionStorage.getItem(RETURN_VIEW_KEY)||'';sessionStorage.removeItem(RETURN_VIEW_KEY)}catch(_){}
+    firstLoad=!S.user;
     if(S.user)resetFormDraft();
     cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
@@ -611,6 +611,8 @@ async function refresh(){
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
   if(syncAccountLanguage(next.user))return;
+  /* Read only on the load that stays, so a second language reload still comes back. */
+  if(firstLoad){try{back=sessionStorage.getItem(RETURN_VIEW_KEY)||'';sessionStorage.removeItem(RETURN_VIEW_KEY)}catch(_){}}
   S=next;lastStateAt=Date.now();restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();
   if(back==='settings')switchView('settings');
   if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();
