@@ -1599,6 +1599,20 @@ test('files dragged in from another app upload anywhere in the project space, fo
   assert.equal(a.json('toasts').length,1,'a folder-only drop says why nothing uploaded');
   a.run(`UI.space='old';renderProjects();`);
   assert.equal(space.ondrop,null,'an archive takes no drop');
+  const field={closest:s=>(s.includes('textarea')?{}:null)},page={closest:()=>null};
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files']},target:field}),true,'a file never replaces the app');
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files','text/uri-list']},target:page}),true,'nor does a web image dropped on the page');
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files','text/uri-list']},target:field}),false,'a link dropped in a text field is typed in');
+});
+
+test('an upload puts unsaved 项目背景 back, only into the same project (#117)',async()=>{
+  const a=app(),els={'#spaceBackgroundEditor':{dataset:{mode:'preview'}},'#saveBackground':{disabled:false},'#spaceBackground':{tagName:'TEXTAREA',value:'没保存的背景'}};
+  a.context.document={querySelector:s=>els[s]||null,querySelectorAll:()=>[]};
+  a.run(`var put=[];mdSet=(r,v)=>put.push(v);mdShow=(r,m)=>put.push(m);UI.space='A';`);
+  a.run(`refresh=async()=>{}`);await a.run(`refreshKeepingBackground({id:'A'})`);
+  assert.deepEqual(a.json('put'),['没保存的背景','preview'],'the draft and its mode come back');
+  a.run(`put=[];refresh=async()=>{UI.space='B'}`);await a.run(`refreshKeepingBackground({id:'A'})`);
+  assert.deepEqual(a.json('put'),[],'another project opened meanwhile gets nothing');
 });
 
 test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
