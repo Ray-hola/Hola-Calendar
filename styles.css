@@ -2042,14 +2042,14 @@ html:lang(en) .nav-brand-name strong {
    scroll padding, so it reaches into that padding and covers it. */
 .modal-footer {
   position: sticky;
-  bottom: calc(-1 * var(--modal-pad-bottom));
+  bottom: calc(-1 * var(--modal-pad-bottom, 0px));
   z-index: 2;
   display: flex;
   justify-content: flex-end;
   margin-top: 26px;
-  margin-bottom: calc(-1 * var(--modal-pad-bottom));
+  margin-bottom: calc(-1 * var(--modal-pad-bottom, 0px));
   padding-top: 18px;
-  padding-bottom: var(--modal-pad-bottom);
+  padding-bottom: var(--modal-pad-bottom, 0px);
   background: var(--surface);
   border-top: 1px solid var(--hair);
   gap: 10px;

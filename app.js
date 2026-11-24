@@ -3666,8 +3666,9 @@ function prepareDialog(dialog,content,fallbackTitleId){
   dialog?.setAttribute?.('tabindex','-1');
 }
 function focusDialog(dialog,content){
+  // Editable text is reachable with Tab but not focused on opening: an 档案 still typing itself out would eat keys.
   const contentControls=dialogControls(content),target=contentControls.find(el=>el.hasAttribute?.('autofocus'))
-    ||contentControls[0]||dialogControls(dialog)[0]||dialog;
+    ||contentControls.find(el=>!el.isContentEditable)||contentControls[0]||dialogControls(dialog)[0]||dialog;
   target?.focus?.({preventScroll:true});
 }
 function topOpenDialog(){
@@ -3678,9 +3679,16 @@ function topOpenDialog(){
 }
 function dialogKeydown(e){
   if(e.key!=='Tab'||e.defaultPrevented)return;
-  // The assistant panel floats beside dialogs and keeps its own Tab order.
-  if(e.target?.closest?.('#agentPanel'))return;
   const dialog=topOpenDialog();if(!dialog)return;
+  // The assistant panel floats beside dialogs and keeps its own Tab order; at its ends Tab returns to the dialog.
+  const panel=e.target?.closest?.('#agentPanel');
+  if(panel){
+    const own=dialogControls(panel),inDialog=dialogControls(dialog);
+    if(!own.length||!inDialog.length)return;
+    if(!e.shiftKey&&e.target===own[own.length-1]){e.preventDefault();inDialog[0].focus()}
+    else if(e.shiftKey&&e.target===own[0]){e.preventDefault();inDialog[inDialog.length-1].focus()}
+    return;
+  }
   const controls=dialogControls(dialog),active=document.activeElement;
   if(!controls.length){e.preventDefault();dialog.focus?.({preventScroll:true});return}
   // Focus on the dialog itself (after a click on its blank area) counts as outside its controls.

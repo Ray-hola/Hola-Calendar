@@ -2589,7 +2589,7 @@ test('Tab from the dialog itself wraps, the assistant panel keeps its own Tab, h
   const a=app(),focused=[];
   const control=(id,extra={})=>({id,focus(){focused.push(id)},hasAttribute:()=>false,closest:()=>null,getClientRects:()=>[{}],...extra});
   const close=control('close'),notes=control('notes'),ghost=control('ghost'),save=control('save');
-  const dialog={querySelectorAll:()=>[close,notes,ghost,save],contains:el=>[close,notes,ghost,save].includes(el),
+  const dialog={querySelectorAll:()=>[close,notes,ghost,save],contains:el=>el===dialog||[close,notes,ghost,save].includes(el),
     focus(){focused.push('dialog')}};
   const layer=hidden=>({classList:{contains:key=>key==='hidden'&&hidden}});
   a.context.document={activeElement:dialog,querySelector:selector=>({
@@ -2600,19 +2600,28 @@ test('Tab from the dialog itself wraps, the assistant panel keeps its own Tab, h
   a.run('dialogKeydown(event)');
   assert.deepEqual(focused,['save'],'Shift+Tab from the dialog box goes to its last control');
   assert.equal(a.run('dialogControls(document.querySelector("#modalBackdrop .modal")).map(x=>x.id).join()'),'close,notes,save');
-  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:false,target:{closest:s=>s==='#agentPanel'?{}:null},
-    preventDefault(){this.defaultPrevented=true}};
-  a.context.document.activeElement=control('agent-input');
+  const input=control('agent-input'),send=control('agent-send'),agent={querySelectorAll:()=>[input,send]};
+  input.closest=s=>(s==='#agentPanel'?agent:null);send.closest=input.closest;
+  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:false,target:input,preventDefault(){this.defaultPrevented=true}};
+  a.context.document.activeElement=input;
   a.run('dialogKeydown(event)');
   assert.equal(a.context.event.defaultPrevented,false,'Tab inside the assistant panel is left alone');
+  a.context.event={key:'Tab',defaultPrevented:false,shiftKey:false,target:send,preventDefault(){this.defaultPrevented=true}};
+  a.run('dialogKeydown(event)');
+  assert.equal(focused.at(-1),'close','Tab past the panel end comes back to the dialog, not the page behind');
+  const doc={id:'doc',isContentEditable:true,focus(){focused.push('doc')},hasAttribute:()=>false,closest:()=>null,getClientRects:()=>[{}]};
+  a.context.content={querySelectorAll:()=>[doc,save]};
+  a.run('focusDialog(document.querySelector("#modalBackdrop .modal"),content)');
+  assert.equal(focused.at(-1),'save','opening focuses a control before editable text');
   assert.match(a.run('DIALOG_FOCUSABLES'),/\[contenteditable\]:not\(\[contenteditable="false"\]\)/);
 });
 
 test('modal actions remain reachable and overflowing panels expose their scrollbars', () => {
   const css=fs.readFileSync(path.join(__dirname,'../styles.css'),'utf8');
   const footer=css.match(/\.modal-footer \{([\s\S]*?)\}/)?.[1]||'';
-  assert.match(footer,/position:\s*sticky/);assert.match(footer,/bottom:\s*calc\(-1 \* var\(--modal-pad-bottom\)\)/);
-  assert.match(footer,/padding-bottom:\s*var\(--modal-pad-bottom\)/,'the footer covers the scroll padding below it');assert.match(footer,/background:\s*var\(--surface\)/);
+  assert.match(footer,/position:\s*sticky/);assert.match(footer,/bottom:\s*calc\(-1 \* var\(--modal-pad-bottom, 0px\)\)/,
+    'outside a dialog (the in-page meeting editor) it is bottom:0 as before');
+  assert.match(footer,/padding-bottom:\s*var\(--modal-pad-bottom, 0px\)/,'the footer covers the scroll padding below it');assert.match(footer,/background:\s*var\(--surface\)/);
   for(const selector of ['.modal {','.task-drawer {']){
     const block=css.match(new RegExp(`\\${selector.replace(' ','\\s*')}([\\s\\S]*?)\\}`))?.[1]||'';
     assert.match(block,/scrollbar-width:\s*thin/);assert.match(block,/overscroll-behavior:\s*contain/);
