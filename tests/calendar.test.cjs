@@ -1494,7 +1494,7 @@ test('incomplete AI cards preserve unknown people and projects for correction in
   assert.ok(a.run('Boolean(planProblems(board,board.tasks[0]).date&&planProblems(board,board.tasks[0]).time)'));
 });
 
-test('confirming incomplete cards writes nothing; corrected cards submit once and clear undo history',async()=>{
+test('confirming incomplete cards writes nothing; corrected cards submit once and undo cannot bring them back',async()=>{
   const a=planningApp(),writes=[];
   a.context.document={querySelector:()=>null};
   a.context.fetch=async(path,options)=>{writes.push(JSON.parse(options.body));return {ok:true,text:async()=>'{"id":"created"}'}};
@@ -1508,7 +1508,9 @@ test('confirming incomplete cards writes nothing; corrected cards submit once an
   assert.equal(writes[0].action,'work.card.apply');
   assert.equal(writes[0].data.kind,'task');
   assert.equal(writes[0].data.operation,'create');
-  assert.equal(a.run('board.history.length'),0,'已提交的卡片不能通过撤销变回未提交');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].state'),'done','已提交的卡片不能通过撤销变回未提交');
+  assert.equal(a.run('board.tasks[0].name'),'整理周报');
   await a.run('planSubmit(board)');
   assert.equal(writes.length,1,'已完成的卡片不重复提交');
 });
@@ -1678,6 +1680,43 @@ test('work-log and 成果库 detail opens the live task, the live project, or an
   const modal=a.run('modal');
   for(const text of ['已交付项目','陈曦','1/1','2026-11-01','按期交付','收尾','王零 · 已完成'])assert.ok(modal.includes(text),text);
   assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
+});
+
+test('a 成果库 project shows each task with ✅, its links and what the person said (#124)',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var modal='';openModal=h=>{modal=h};
+    S.user={id:'superadmin',admin:1};S.users=[{id:'wang00',displayName:'王零'},{id:'li01',displayName:'李一'},{id:'zhao02',displayName:'<b>赵</b>'}];
+    S.projects=[];S.fileArchives=[];
+    S.achievements=[{id:'old',name:'已交付项目',status:'done',completedAt:'2026-11-01',tasks:[
+      {id:'a',name:'任务A',assignee:'wang00',status:'done',completionSummary:'方案见 https://docs.example.com/a，评审通过。',completionFeeling:'顺利'},
+      {id:'b',name:'任务B',assignee:'li01',completedBy:'li01',status:'done',completionSummary:'https://git.example.com/pr/9 https://git.example.com/pr/9',completionFeeling:'困难'},
+      {id:'c',name:'任务C',assignee:'zhao02',status:'done',completionSummary:'<img src=x onerror=alert(1)>'},
+      {id:'d',name:'任务D',assignee:'wang00',status:'deferred',completionSummary:'https://not.shown.example.com'}]}];
+    openWorkLogDetail('','old','project')`);
+  const modal=a.run('modal'),items=modal.split('<li').slice(1);
+  assert.equal(items.length,4);
+  assert.match(items[0],/任务A<\/b><span>王零 · 已完成 ✅<\/span><a href="https:\/\/docs\.example\.com\/a" target="_blank" rel="noopener noreferrer">🔗 docs\.example\.com<\/a>/);
+  assert.match(items[0],/<p>王零觉得很顺利：方案见，评审通过。<\/p>/);
+  assert.equal(items[1].match(/<a /g).length,1,'the same link shows once');
+  assert.match(items[1],/<p>李一觉得有些困难<\/p>/);
+  assert.ok(!modal.includes('<img'),'a summary is text, not markup');
+  assert.match(items[2],/&lt;b&gt;赵&lt;\/b&gt;说：&lt;img/);
+  assert.ok(!items[3].includes('✅')&&!items[3].includes('not.shown'),'an unfinished task gets no ✅ and no links');
+  const one=summary=>{a.run(`S.achievements[0].tasks=[{id:'x',name:'X',assignee:'wang00',status:'done',completionSummary:${JSON.stringify(summary)}}];openWorkLogDetail('','old','project')`);return a.run('modal')};
+  let html=one('https://a.com/x见附件');
+  assert.match(html,/href="https:\/\/a\.com\/x"/);assert.match(html,/王零说：见附件/,'Chinese after a link stays in the sentence');
+  html=one('see https://a.com/wiki/A_(b). Done (https://b.com/y)');
+  assert.match(html,/href="https:\/\/a\.com\/wiki\/A_\(b\)"/);assert.match(html,/href="https:\/\/b\.com\/y"/);
+  assert.match(html,/王零说：see\. Done<\/p>/,'the cut period stays, an emptied bracket goes');
+  html=one('https://a.com/1,https://b.com/2');
+  assert.equal(html.match(/<a /g).length,2,'two links written with a comma between are two links');
+  assert.match(one('定稿见 https://a.com/f ，评审通过'),/王零说：定稿见，评审通过/);
+  assert.match(one('资料【https://a.com/x.】已归档'),/王零说：资料已归档/,'a bracket left holding only the link goes');
+  html=one('（见 https://a.com/x.）调用 foo() 即可，比例 3 : 1');
+  assert.match(html,/href="https:\/\/a\.com\/x"/,'the period before a closing bracket is not part of the link');
+  assert.match(html,/王零说：（见.）调用 foo\(\) 即可，比例 3 : 1<\/p>/,'text away from the link is left as written');
+  assert.match(one('https://ok.com@evil.com/x?a=1&b=2'),/href="https:\/\/ok\.com@evil\.com\/x\?a=1&amp;b=2"[^>]*>🔗 evil\.com</,'the label names the host the link really opens');
 });
 
 test('project invites show the owner display name',()=>{
@@ -3762,7 +3801,28 @@ test('the account menu offers both languages and marks the current one', () => {
   assert.match(html, /data-lang="zh"[^>]*>简体中文</);
   assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
   assert.match(html, /aria-label="Language"/);
-  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{languageChooserHTML\('account-menu-group'\)\}/);
+  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{switchGroup\}\$\{foot\}`/, 'the account menu has no switches (#123)');
+});
+
+test('系统设置 is for everyone: members get 个人偏好 with language and look, and no admin rows (#123)', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /<button class="nav-item" data-view="settings">/, 'the nav item is not admin-only');
+  assert.match(html, /id="settings-personal"[^>]*>[\s\S]*?data-setting="language" data-role="self"[\s\S]*?data-setting="myAppearance" data-role="self"/);
+  const a = app(), rows = [], els = {};
+  const node = (extra = {}) => ({innerHTML: '', dataset: {}, classList: {on: new Set(), toggle(c, v) {
+    v ? this.on.add(c) : this.on.delete(c);
+  }, contains(c) {
+    return this.on.has(c);
+  }}, querySelector: () => null, querySelectorAll: () => [], ...extra});
+  for (const [setting, role] of [['language', 'self'], ['myAppearance', 'self'], ['rules', 'superadmin'], ['week', 'admin'], ['theme', 'admin']]) rows.push(node({dataset: {setting, role}}));
+  a.context.document = {querySelector: s => els[s] || (els[s] = node()), querySelectorAll: s => (s === '#settingsView .setting-row' ? rows : [])};
+  a.run("S.user={id:'m1',admin:0,role:'member'};S.users=[];renderSettings();renderAccountMenu()");
+  assert.deepEqual(rows.filter(r => !r.classList.on.has('is-forbidden')).map(r => r.dataset.setting), ['language', 'myAppearance']);
+  assert.match(els['#languageSetting'].innerHTML, /data-lang="en"/);
+  assert.match(els['#myAppearanceSetting'].innerHTML, /data-appearance=""[^>]*>跟随团队/);
+  assert.match(els['#accountMenu'].innerHTML, /data-action="settings"/, 'members open 系统设置 from the account menu too');
+  assert.doesNotMatch(els['#accountMenu'].innerHTML, /language-option|data-appearance/);
+  assert.match(source, /if\(view==='accounts'&&!S\.user\?\.admin\)\{view='calendar'\}/, 'only 账户管理 stays admin-only');
 });
 
 test('the account’s saved language wins over the browser unless ?lang= is set', () => {
@@ -4570,4 +4630,117 @@ test('the theme is set before the stylesheet loads and the setting sits in 系�
   for (const name of ['Anthropic风', 'Tempo风', '原色', '暮色', '苔绿', '紫藤', '青灰', '纸墨', '磷光', '琥珀', '跟随团队', '外观'])
     assert.notEqual(en.run(`tr(${JSON.stringify(name)})`), name, `${name} has English`);
   assert.equal(en.run("appearanceName({theme:'tempo',palette:'phosphor'})"), 'Tempo style · Phosphor');
+});
+
+test('accepting one AI card keeps the undo steps of the others (#116)', async () => {
+  const a = planningApp(), writes = [];
+  a.context.document = {querySelector: () => null};
+  a.context.fetch = async (path, options) => {
+    writes.push(JSON.parse(options.body));
+    return {ok: true, text: async () => '{"id":"created"}'};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:'A',assignee:'test001'},{name:'B',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};
+    planCheckpoint(board);board.tasks[1].name='B 改过';`);
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(a.run('board.tasks[0].state'), 'done');
+  assert.equal(a.run('planCanUndo(board)'), true, '另一张卡的修改仍可撤销');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[1].name'), 'B');
+  assert.equal(a.run('board.tasks[0].state'), 'done', '已接受的卡片保持已接受');
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(writes.length, 1, '已接受的卡片不会再提交一次');
+});
+
+test('undo after accepting a hand-added card does not hand its key out again (#116)', async () => {
+  const a = planningApp();
+  a.context.fetch = async () => ({ok: true, text: async () => '{"id":"created"}'});
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:'A',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};
+    planAddTask(board);Object.assign(board.tasks[1],{name:'B',assignee:'test001'});`);
+  await a.run('planSubmit(board,[board.tasks[1]])');
+  a.run('planUndo(board);planAddTask(board)');
+  const keys = a.json('board.tasks.map(t=>t.key)');
+  assert.equal(new Set(keys).size, keys.length, keys.join());
+});
+
+test('a reloaded card keeps its id, so undo neither brings the old version back nor doubles it (#116)', async () => {
+  const a = planningApp(), sent = [];
+  a.context.fetch = async (path, options) => {
+    const body = JSON.parse(options.body);
+    sent.push(body);
+    if (body.action === 'work.cards.preview') {
+      const card = body.data.tasks[0];
+      return {ok: true, text: async () => JSON.stringify({tasks: [{...card, name: 'Fresh', cardId: card.cardId || 'server-new', revision: 'r2', operation: 'update',
+        before: {name: 'Fresh', assignee: 'test001', date: '2026-11-03'}, assignee: 'test001', date: '2026-11-03'}]})};
+    }
+    return {ok: true, text: async () => '{"id":"t9"}'};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{id:'t9',operation:'update',cardId:'card-1',revision:'r1',name:'Old',assignee:'test001',date:'2026-11-03',
+      before:{name:'Old',assignee:'test001',date:'2026-11-03'}}]}),el:{querySelector:()=>null},history:[]};
+    planCheckpoint(board);board.tasks[0].name='New';`);
+  await a.run('planReload(board,board.tasks[0])');
+  assert.equal(sent[0].data.tasks[0].cardId, 'card-1', 'the preview is asked for the same card');
+  assert.equal(a.run('board.tasks[0].cardId'), 'card-1');
+  a.run('planUndo(board)');
+  assert.deepEqual(a.json('board.tasks.map(t=>[t.name,t.revision])'), [['Fresh', 'r2']], '撤销不回到重新读取前的旧版本');
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  a.run('planUndo(board)');
+  assert.deepEqual(a.json('board.tasks.map(t=>[t.cardId,t.state])'), [['card-1', 'done']], '接受后撤销不出现重复卡片');
+});
+
+test('a card found applied after a lost response stays accepted through undo (#116)', async () => {
+  const a = planningApp();
+  a.context.fetch = async (path, options) => {
+    const body = JSON.parse(options.body);
+    if (body.action === 'work.card.apply') return {ok: false, status: 502, text: async () => '{"error":"网关超时"}'};
+    return {ok: true, text: async () => JSON.stringify({receipts: {cp: {id: 'p7'}}})};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({projects:[{ref:'P',name:'新项目',cardId:'cp'}],tasks:[{name:'A',assignee:'test001',projectRef:'P',cardId:'ct'}]}),
+      conversationId:'c1',draftId:'d1',el:{querySelector:()=>null},history:[]};
+    agentState.planBoard=board;agentState.conversationId='c1';planCheckpoint(board);board.tasks[0].name='A2';`);
+  await a.run('planSubmit(board,[board.projects[0]])');
+  assert.equal(a.run('board.projects[0].state'), 'done');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.projects[0].state'), 'done', '撤销后仍是已接受');
+  assert.equal(a.run('board.tasks[0].name'), 'A');
+  assert.equal(a.run('board.tasks[0].project'), 'id:p7', '旧步骤里的任务也跟着新建的项目');
+});
+
+test('ticking a card is not an undo step, and the undo button wakes up while a number is typed (#116)', () => {
+  const a = planningApp();
+  a.run(`var board={...planDraft({tasks:[{name:'A',assignee:'test001',duration:30}]}),history:[]};
+    planCheckpoint(board);board.tasks[0].selected=true;`);
+  assert.equal(a.run('planCanUndo(board)'), false, '只勾选没有可撤销的内容');
+  const listeners = {}, undo = {disabled: true};
+  const card = {dataset: {key: a.run('board.tasks[0].key')}};
+  const field = {dataset: {f: 'duration'}, value: '45', closest: s => (s === '.plan-card' ? card : null), hasAttribute: () => false};
+  a.context.el = {dataset: {}, addEventListener: (type, f) => {
+    listeners[type] = f;
+  }, querySelector: s => (s === '.plan-undo' ? undo : null), querySelectorAll: () => []};
+  a.run('board.el=el;planBind(board)');
+  listeners.focusin({target: field});
+  listeners.input({target: field});
+  assert.equal(a.run('board.tasks[0].duration'), 45);
+  assert.equal(undo.disabled, false, '还没离开输入框，撤销修改就能点');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].duration'), 30);
+  assert.equal(a.run('board.tasks[0].selected'), true, '撤销不动勾选');
+});
+
+test('the sidebar sits above the project space so the account menu is not covered (#122)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  const z = selector => Number(css.match(new RegExp(`(?:^|\\n)${selector} \\{[^}]*?z-index: (\\d+)`))?.[1]);
+  assert.ok(z('\\.sidebar') > z('\\.space-tabs'), 'above the sticky project tabs');
+  assert.ok(z('\\.sidebar') > z('\\.topbar'), 'and the top bar');
+});
+
+test('连接桌面 App hands this server’s own address to the desktop app as an encoded hola:// link', () => {
+  const a = app();
+  assert.equal(a.run("desktopConnectLink('https://work.example.com')"), 'hola://connect?server=https%3A%2F%2Fwork.example.com');
+  assert.equal(a.run("desktopConnectLink('http://192.168.1.8:4173')"), 'hola://connect?server=http%3A%2F%2F192.168.1.8%3A4173');
+  assert.match(source, /row\('desktop',tr\('连接桌面 App'\)/, 'every account sees it, not only admins');
+  assert.match(source, /action==='desktop'\)connectDesktopApp\(\)/);
 });

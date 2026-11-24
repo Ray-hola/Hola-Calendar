@@ -388,6 +388,8 @@ class RepeatFeatureTests(unittest.TestCase):
         # Simulate an approved completion and project closeout, keeping the
         # same persisted fields used by the real approval actions.
         task['status'] = 'done'; task['completedAt'] = timestamp = f'{self.today.isoformat()}T18:00:00+08:00'
+        task.update({'completedBy': 'test001', 'completionSummary': '交付文档 https://docs.example.com/x',
+                     'completionFeeling': '顺利'})
         self.store.put('tasks', task)
         project.update({'status': 'done', 'completedAt': timestamp,
                         'completedBy': 'superadmin', 'completionReport': '交付完成'})
@@ -398,7 +400,15 @@ class RepeatFeatureTests(unittest.TestCase):
         self.assertEqual(item['taskStats']['completed'], 1)
         self.assertEqual(item['completionReport'], '交付完成')
         self.assertEqual(item['lifecycle'][-1]['stage'], 'done')
+        # Each task says what its completion record said (#124).
+        self.assertEqual({k: item['tasks'][0][k] for k in ('completedBy', 'completionSummary', 'completionFeeling')},
+                         {'completedBy': 'test001', 'completionSummary': '交付文档 https://docs.example.com/x',
+                          'completionFeeling': '顺利'})
         self.assertEqual(self.store.snapshot(self.member)['achievements'], [])
+        # A task completed through the old approval flow keeps its summary there.
+        task.pop('completionSummary'); task['approval'] = {'summary': '审批时写的总结'}
+        self.store.put('tasks', task); self.store.db.commit()
+        self.assertEqual(self.store.snapshot(self.admin)['achievements'][0]['tasks'][0]['completionSummary'], '审批时写的总结')
 
 
 if __name__ == '__main__':

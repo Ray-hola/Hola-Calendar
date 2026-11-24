@@ -157,6 +157,11 @@ MAX_AUDIO_BYTES = 8_000_000
 FILES_PATH = '/api/files'
 FILE_TEXT_PATH = FILES_PATH + '/text'
 MAX_FILE_BYTES = 20_000_000
+# What GET /api/info tells a client before anyone signs in: that this is a
+# 哗啦待办 server and which version of the API it speaks. The desktop app
+# checks it on 连接 and refuses a server whose `api` is newer than it knows.
+# Raise `api` only when a change would break an existing client.
+SERVER_INFO = {'product': 'hola-calendar', 'name': '哗啦待办', 'api': 1}
 # Interface languages an account can choose; the UI text itself lives in i18n.js.
 LANGS = ('zh', 'en')
 TABLES = ('projects', 'tasks', 'logs', 'repeats', 'reports', 'diaries', 'notifications', 'requests', 'edit_requests',
@@ -3202,7 +3207,9 @@ class Store:
                 'completionRejection': project.get('completionRejection'),
                 'taskStats': counts, 'lifecycle': lifecycle,
                 'tasks': [{'id': t.get('id'), 'name': t.get('name', ''), 'assignee': t.get('assignee'),
-                           'status': t.get('status'), 'date': t.get('date'), 'completedAt': t.get('completedAt')}
+                           'status': t.get('status'), 'date': t.get('date'), 'completedAt': t.get('completedAt'),
+                           'completedBy': t.get('completedBy'), 'completionSummary': t.get('completionSummary') or (t.get('approval') or {}).get('summary', ''),
+                           'completionFeeling': t.get('completionFeeling', '')}
                           for t in leaves],
             })
         return sorted(result, key=lambda item: str(item.get('completedAt') or item.get('createdAt') or ''), reverse=True)
@@ -5301,6 +5308,7 @@ def main():
             try:
                 if self.path=='/api/state':self.send(200,store.snapshot(store.authenticate(self.token())));return
                 if self.path=='/api/health':self.send(200,{'ok':True,'timezone':'Asia/Shanghai'});return
+                if self.path=='/api/info':self.send(200,SERVER_INFO);return
                 if self.path.startswith(FILES_PATH+'/'):
                     # A download by default. ?preview=1 shows a file in the browser
                     # only when its bytes prove it is a raster image, a PDF or plain

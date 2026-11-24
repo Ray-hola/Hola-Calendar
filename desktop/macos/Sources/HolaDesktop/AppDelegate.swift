@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import HolaCore
 
 @main
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
@@ -18,6 +19,8 @@ import SwiftUI
     private var touchBar: TouchBarController!
     private var island: IslandController!
     private var bag: Set<AnyCancellable> = []
+    /// A `hola://` link that arrived before launch finished (a cold start opens it first).
+    private var pendingConnect: URL?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -46,6 +49,11 @@ import SwiftUI
 
         state.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.renderStatusItem() }.store(in: &bag)
         renderStatusItem()
+        if let server = pendingConnect {
+            pendingConnect = nil
+            state.openConnectLink(server)
+            showPopover()
+        }
     }
 
     /// The menu-bar item carries the countdown while a session runs.
@@ -60,12 +68,24 @@ import SwiftUI
 
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
         if NSApp.currentEvent?.type == .rightMouseUp { showMenu(sender); return }
-        if popover.isShown { popover.performClose(nil) } else {
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            // Becoming active gives the popover key status and brings up the Touch Bar.
-            NSApp.activate(ignoringOtherApps: true)
-            state.refreshIfStale()
-        }
+        if popover.isShown { popover.performClose(nil) } else { showPopover() }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem?.button, !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Becoming active gives the popover key status and brings up the Touch Bar.
+        NSApp.activate(ignoringOtherApps: true)
+        state.refreshIfStale()
+    }
+
+    /// `hola://connect?server=…` from the web app's 「连接桌面 App」: the address
+    /// is filled in on the 连接 screen and the popover opens for the person to confirm.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let server = urls.lazy.compactMap(ConnectLink.server(from:)).first else { return }
+        guard state != nil else { pendingConnect = server; return }
+        state.openConnectLink(server)
+        showPopover()
     }
 
     private func showMenu(_ sender: NSStatusBarButton) {
