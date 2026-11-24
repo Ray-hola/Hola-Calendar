@@ -1952,6 +1952,9 @@ html:lang(en) .nav-brand-name strong {
   top: 0;
   bottom: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
   width: min(540px, 100%);
   padding: 36px 40px 40px;
   background: var(--surface);
@@ -1968,9 +1971,14 @@ html:lang(en) .nav-brand-name strong {
   background: var(--surface);
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
   animation: wcModalIn var(--t-slow) var(--ease-spring) both;
   width: min(520px, calc(100% - 32px));
-  padding: 34px 36px 30px;
+  --modal-pad-bottom: 30px;
+  padding: 34px 36px var(--modal-pad-bottom);
+  scroll-padding-bottom: 96px;
   border-radius: 18px;
   border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
@@ -2030,13 +2038,34 @@ html:lang(en) .nav-brand-name strong {
   margin: 0 0 18px;
 }
 
+/* The footer sits flush with the dialog's bottom edge: sticky positions inside the
+   scroll padding, so it reaches into that padding and covers it. */
 .modal-footer {
+  position: sticky;
+  bottom: calc(-1 * var(--modal-pad-bottom, 0px));
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
   margin-top: 26px;
+  margin-bottom: calc(-1 * var(--modal-pad-bottom, 0px));
   padding-top: 18px;
+  padding-bottom: var(--modal-pad-bottom, 0px);
+  background: var(--surface);
   border-top: 1px solid var(--hair);
   gap: 10px;
+}
+
+.modal::-webkit-scrollbar,
+.task-drawer::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+
+.modal::-webkit-scrollbar-thumb,
+.task-drawer::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 2px solid var(--surface);
+  border-radius: 8px;
 }
 
 .toast {
@@ -10237,7 +10266,8 @@ select:focus {
     max-width: 92%;
   }
   .modal {
-    padding: 28px 22px 24px;
+    --modal-pad-bottom: 24px;
+    padding: 28px 22px var(--modal-pad-bottom);
     border-radius: 16px;
   }
   .task-drawer {
