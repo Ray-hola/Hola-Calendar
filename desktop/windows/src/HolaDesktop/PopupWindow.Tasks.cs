@@ -43,7 +43,8 @@ namespace Hola.Desktop
                 foreach (var t in state.Tasks) list.Children.Add(TaskRow(t));
                 taskList = new ScrollViewer { Content = list, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
                 var keep = taskScroll;
-                taskList.Loaded += (_, __) => taskList.ScrollToVerticalOffset(keep);
+                var shown = taskList;
+                shown.Loaded += (_, __) => { shown.ScrollToVerticalOffset(keep); shown.UpdateLayout(); };
                 panel.Children.Add(taskList);
             }
             var n = Notice(2); n.Margin = new Thickness(0, 6, 0, 0);

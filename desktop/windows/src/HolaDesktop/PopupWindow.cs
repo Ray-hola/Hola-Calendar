@@ -68,10 +68,9 @@ namespace Hola.Desktop
             Left = -32000; Top = -32000;
             Show();
             builtKey = null; taskList = null; taskScroll = 0;
-            Render();
-            UpdateLayout();
-            Place();
-            Activate();
+            try { Render(); UpdateLayout(); }
+            // Even half drawn, the panel comes on screen and takes the focus, so a click elsewhere still closes it.
+            finally { Place(); Activate(); }
             state.RefreshIfStale();
             state.RefreshLaunchAtLogin();
         }
@@ -105,7 +104,8 @@ namespace Hola.Desktop
                 var focused = Keyboard.FocusedElement;
                 if (taskList != null && taskList.IsLoaded) taskScroll = taskList.VerticalOffset;
                 builtKey = key;
-                try { Build(); } catch { builtKey = null; throw; }
+                try { Build(); }
+                catch (Exception e) { builtKey = null; Program.Log(e); return; }
                 if (focused == serverBox || focused == userBox || focused == passBox) Dispatcher.BeginInvoke(new Action(() => ((Control)focused).Focus()));
             }
             UpdateDynamic();

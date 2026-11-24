@@ -129,7 +129,7 @@ namespace Hola.Core
                 {
                     var text = resp.Content == null ? "" : await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                     var cookies = resp.Headers.TryGetValues("Set-Cookie", out var v) ? v.ToList() : new List<string>();
-                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies, Location = resp.Headers.Location?.ToString() };
+                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies, Location = resp.Headers.Location == null ? null : new Uri(url, resp.Headers.Location).AbsoluteUri };
                 }
             }
             catch (HttpRequestException e) { throw new ApiException(ApiErrorKind.Offline, (e.InnerException ?? e).Message); }

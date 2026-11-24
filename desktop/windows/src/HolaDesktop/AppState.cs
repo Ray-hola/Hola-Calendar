@@ -96,7 +96,12 @@ namespace Hola.Desktop
         {
             if (changePending) return;
             changePending = true;
-            dispatcher.BeginInvoke(new Action(() => { changePending = false; Changed?.Invoke(); }), DispatcherPriority.DataBind);
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                changePending = false;
+                foreach (var view in Changed?.GetInvocationList() ?? new Delegate[0])
+                    try { ((Action)view)(); } catch (Exception e) { Program.Log(e); }
+            }), DispatcherPriority.DataBind);
         }
 
         /// <summary>Lets the views say a field they own changed (typing in a box).</summary>

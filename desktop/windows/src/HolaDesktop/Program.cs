@@ -70,20 +70,29 @@ namespace Hola.Desktop
         static string CrashLog => Path.Combine(Path.GetDirectoryName(Settings.DefaultPath), "crash.log");
 
         static string lastLogged;
+        static readonly object logLock = new object();
 
         /// <summary>Appends to crash.log, skipping a repeat of the last entry and starting over past 1 MB.</summary>
-        static void Log(Exception e)
+        internal static void Log(Exception e)
         {
             var text = e.ToString();
-            if (text == lastLogged) return;
-            lastLogged = text;
-            try
+            lock (logLock)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(CrashLog));
-                if (File.Exists(CrashLog) && new FileInfo(CrashLog).Length > 1 << 20) File.Delete(CrashLog);
-                File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
+                if (text == lastLogged) return;
+                lastLogged = text;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(CrashLog));
+                    if (File.Exists(CrashLog) && new FileInfo(CrashLog).Length > 1 << 20)
+                    {
+                        var old = Path.ChangeExtension(CrashLog, ".old.log");
+                        File.Delete(old);
+                        File.Move(CrashLog, old);
+                    }
+                    File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
+                }
+                catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
 
         /// <summary>
@@ -118,8 +127,11 @@ namespace Hola.Desktop
                 {
                     pipe.Connect(3000);
                     // This start came from a click, so it may hand the foreground on: the panel then gets the focus.
-                    if (GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid) && IsOurs((int)pid))
+                    if (GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid))
+                    {
+                        if (!IsOurs((int)pid)) return;   // someone else holds the name: they get nothing
                         AllowSetForegroundWindow(pid);
+                    }
                     var bytes = Encoding.UTF8.GetBytes(server);
                     pipe.Write(bytes, 0, Math.Min(bytes.Length, MaxMessage));
                 }

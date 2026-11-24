@@ -26,8 +26,10 @@ namespace Hola.Core
         {
             Path = path ?? DefaultPath;
             // A file left unreadable by a power cut falls back to the copy from the write before.
-            var main = Json.Object(Read(Path));
-            mainBroken = main == null && File.Exists(Path);
+            var text = Read(Path);
+            var main = Json.Object(text);
+            // Locked for a moment (antivirus, indexer) is not broken: only text that will not parse is.
+            mainBroken = text != null && main == null;
             values = main ?? Json.Object(Read(Backup)) ?? new Dictionary<string, object>();
         }
 
@@ -61,8 +63,8 @@ namespace Hola.Core
                         f.Write(bytes, 0, bytes.Length);
                         f.Flush(flushToDisk: true);
                     }
-                    if (mainBroken && File.Exists(Path)) File.Delete(Path);
-                    if (File.Exists(Path)) File.Replace(temp, Path, Backup, ignoreMetadataErrors: true); else File.Move(temp, Path);
+                    // A broken main file is swapped out without becoming the backup, in one step.
+                    if (File.Exists(Path)) File.Replace(temp, Path, mainBroken ? null : Backup, ignoreMetadataErrors: true); else File.Move(temp, Path);
                     mainBroken = false;
                     return;
                 }

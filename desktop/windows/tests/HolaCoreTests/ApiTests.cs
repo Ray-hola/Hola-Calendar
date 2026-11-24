@@ -107,6 +107,8 @@ namespace Hola.Tests
                 // A redirect is not followed; the message says where it pointed.
                 Stub.Handler = _ => Reply(301, "", new Dictionary<string, string> { ["Location"] = "https://hola.test/api/health" });
                 await Throws(new ApiException(ApiErrorKind.Server, "服务器把请求转到了 https://hola.test/api/health，请改填这个地址", 301), () => Client().Health());
+                Stub.Handler = _ => Reply(302, "", new Dictionary<string, string> { ["Location"] = "/login" });
+                await Throws(new ApiException(ApiErrorKind.Server, "服务器把请求转到了 http://hola.test:4173/login，请改填这个地址", 302), () => Client().Health());
                 Eq(new ApiException(ApiErrorKind.Server, "只能记录自己的任务", 403).Message, "只能记录自己的任务");
             });
 
