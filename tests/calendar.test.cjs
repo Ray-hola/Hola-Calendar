@@ -1494,7 +1494,7 @@ test('incomplete AI cards preserve unknown people and projects for correction in
   assert.ok(a.run('Boolean(planProblems(board,board.tasks[0]).date&&planProblems(board,board.tasks[0]).time)'));
 });
 
-test('confirming incomplete cards writes nothing; corrected cards submit once and clear undo history',async()=>{
+test('confirming incomplete cards writes nothing; corrected cards submit once and undo cannot bring them back',async()=>{
   const a=planningApp(),writes=[];
   a.context.document={querySelector:()=>null};
   a.context.fetch=async(path,options)=>{writes.push(JSON.parse(options.body));return {ok:true,text:async()=>'{"id":"created"}'}};
@@ -1508,7 +1508,9 @@ test('confirming incomplete cards writes nothing; corrected cards submit once an
   assert.equal(writes[0].action,'work.card.apply');
   assert.equal(writes[0].data.kind,'task');
   assert.equal(writes[0].data.operation,'create');
-  assert.equal(a.run('board.history.length'),0,'已提交的卡片不能通过撤销变回未提交');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].state'),'done','已提交的卡片不能通过撤销变回未提交');
+  assert.equal(a.run('board.tasks[0].name'),'整理周报');
   await a.run('planSubmit(board)');
   assert.equal(writes.length,1,'已完成的卡片不重复提交');
 });
@@ -4450,4 +4452,52 @@ test('the theme is set before the stylesheet loads and the setting sits in 系�
   for (const name of ['Anthropic风', 'Tempo风', '原色', '暮色', '苔绿', '紫藤', '青灰', '纸墨', '磷光', '琥珀', '跟随团队', '外观'])
     assert.notEqual(en.run(`tr(${JSON.stringify(name)})`), name, `${name} has English`);
   assert.equal(en.run("appearanceName({theme:'tempo',palette:'phosphor'})"), 'Tempo style · Phosphor');
+});
+
+test('accepting one AI card keeps the undo steps of the others (#116)', async () => {
+  const a = planningApp(), writes = [];
+  a.context.document = {querySelector: () => null};
+  a.context.fetch = async (path, options) => {
+    writes.push(JSON.parse(options.body));
+    return {ok: true, text: async () => '{"id":"created"}'};
+  };
+  a.run(`refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{name:'A',assignee:'test001'},{name:'B',assignee:'test001'}]}),el:{querySelector:()=>null},history:[]};
+    planCheckpoint(board);board.tasks[1].name='B 改过';`);
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(a.run('board.tasks[0].state'), 'done');
+  assert.equal(a.run('planCanUndo(board)'), true, '另一张卡的修改仍可撤销');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[1].name'), 'B');
+  assert.equal(a.run('board.tasks[0].state'), 'done', '已接受的卡片保持已接受');
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(writes.length, 1, '已接受的卡片不会再提交一次');
+});
+
+test('ticking a card is not an undo step, and the undo button wakes up while a number is typed (#116)', () => {
+  const a = planningApp();
+  a.run(`var board={...planDraft({tasks:[{name:'A',assignee:'test001',duration:30}]}),history:[]};
+    planCheckpoint(board);board.tasks[0].selected=true;`);
+  assert.equal(a.run('planCanUndo(board)'), false, '只勾选没有可撤销的内容');
+  const listeners = {}, undo = {disabled: true};
+  const card = {dataset: {key: a.run('board.tasks[0].key')}};
+  const field = {dataset: {f: 'duration'}, value: '45', closest: s => (s === '.plan-card' ? card : null), hasAttribute: () => false};
+  a.context.el = {dataset: {}, addEventListener: (type, f) => {
+    listeners[type] = f;
+  }, querySelector: s => (s === '.plan-undo' ? undo : null), querySelectorAll: () => []};
+  a.run('board.el=el;planBind(board)');
+  listeners.focusin({target: field});
+  listeners.input({target: field});
+  assert.equal(a.run('board.tasks[0].duration'), 45);
+  assert.equal(undo.disabled, false, '还没离开输入框，撤销修改就能点');
+  a.run('planUndo(board)');
+  assert.equal(a.run('board.tasks[0].duration'), 30);
+  assert.equal(a.run('board.tasks[0].selected'), true, '撤销不动勾选');
+});
+
+test('the sidebar sits above the project space so the account menu is not covered (#122)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8');
+  const z = selector => Number(css.match(new RegExp(`(?:^|\\n)${selector} \\{[^}]*?z-index: (\\d+)`))?.[1]);
+  assert.ok(z('\\.sidebar') > z('\\.space-tabs'), 'above the sticky project tabs');
+  assert.ok(z('\\.sidebar') > z('\\.topbar'), 'and the top bar');
 });

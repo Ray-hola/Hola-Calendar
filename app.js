@@ -7107,14 +7107,44 @@ function planCheckpoint(board){
 }
 /* A checkpoint is taken when a field gets focus, before anything changes, so
    the newest one is often what the board already shows; undo skips those. */
-function planUndoState(board){return JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next})}
+/* Only what the cards say is kept: ticking a card or clearing its error is not a step to undo. */
+const planCardId=x=>String(x.cardId??x.ref??x.key);
+const planCardContent=({selected,error,result,...rest})=>rest;
+function planUndoState(board){
+  return JSON.stringify({projects:board.projects.map(planCardContent),tasks:board.tasks.map(planCardContent),next:board.next});
+}
 function planCanUndo(board){const now=planUndoState(board);return Boolean(board.history?.some(h=>h!==now))}
+function planSyncUndo(board){
+  const undo=board.el?.querySelector?.('.plan-undo');
+  if(undo)undo.disabled=Boolean(board.busy)||!planCanUndo(board);
+}
+/* A card accepted or sent (state done), or just reloaded, stays as it is now in
+   every earlier step, so undo still steps back the other cards' edits without
+   bringing it back. A rejected card can still be undone back to a draft. */
+function planSettleHistory(board,also=[]){
+  if(!board.history?.length)return;
+  const settled=board.projects.concat(board.tasks).filter(x=>x.state==='done'||also.includes(x));
+  const now=new Map(settled.map(x=>[planCardId(x),planCardContent(x)]));
+  board.history=board.history.map(h=>{
+    const step=JSON.parse(h);
+    for(const k of ['projects','tasks']){
+      const ids=new Set(step[k].map(planCardId));
+      step[k]=step[k].map(x=>now.get(planCardId(x))??x)
+        .concat(board[k].filter(x=>x.state==='done'&&!ids.has(planCardId(x))).map(planCardContent));
+    }
+    step.tasks=step.tasks.map(t=>board.refIds?.[t.project]?{...t,project:board.refIds[t.project]}:t);
+    return JSON.stringify(step);
+  });
+}
 function planUndo(board){
   if(board.busy||!board.history?.length)return;
   const now=planUndoState(board);
   while(board.history.length&&board.history.at(-1)===now)board.history.pop();
   if(!board.history.length){planRender(board);return}
-  Object.assign(board,JSON.parse(board.history.pop()));planRender(board);
+  const ui=new Map(board.projects.concat(board.tasks).map(x=>[planCardId(x),{selected:x.selected,error:x.error,result:x.result}]));
+  const step=JSON.parse(board.history.pop());
+  for(const k of ['projects','tasks'])step[k]=step[k].map(x=>({...x,...(ui.get(planCardId(x))??{})}));
+  Object.assign(board,step);planRender(board);
 }
 function planMarkFields(board){
   board.el.querySelectorAll('.plan-card').forEach(card=>{
@@ -7181,7 +7211,7 @@ async function planReload(board,x){
   try{
     const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op}]}});
     const fresh=planDraft(raw)[kind+'s'][0];
-    Object.assign(x,fresh,kind==='project'?{ref:x.ref}:{key:x.key},{error:''});board.history=[];
+    Object.assign(x,fresh,kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
   }catch(e){x.error=e?.message||tr('读取失败')}
   finally{board.busy=false;agentState.busy=false;planRender(board);agentUpdateBusy()}
 }
@@ -7263,8 +7293,11 @@ function planRender(board,entering=false){
 function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
-  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);planScheduleSave(board)}});
+  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy&&!e.target.hasAttribute?.('data-plan-select'))planCheckpoint(board)});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy||!x||!f)return;
+    if(['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);planSyncUndo(board);planScheduleSave(board);return}
+    // Numbers, dates and times only send change when they lose focus; 撤销修改 is ready as soon as they differ.
+    if(['duration','date','deadline','time','start','end'].includes(f)){x[f]=f==='duration'?Number(e.target.value):e.target.value;planSyncUndo(board)}});
   el.addEventListener('change',e=>{
     const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
     planScheduleSave(board);
@@ -7279,7 +7312,7 @@ function planBind(board){
     // A blur-triggered change must not replace the button under pointerdown.
     // Rebuild only when the available people/project controls actually change.
     if(['owner','project'].includes(f))planRender(board);
-    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);}
+    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);planSyncUndo(board);}
   });
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
@@ -7332,9 +7365,11 @@ async function planSubmit(board,items=null){
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
       const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.before.name):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
-      results[pending?'approval':op]++;board.history=[];
-      if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+      results[pending?'approval':op]++;
+      if(kind==='project'&&op==='create'){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+        board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
+      planSettleHistory(board);
     }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;}}catch(_){}}}
     planRender(board);
   };
