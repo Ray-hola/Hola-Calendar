@@ -1621,7 +1621,7 @@ a.secondary-btn {
   font-size: 11px;
 }
 
-/* 界面语言: a two-way segmented choice, in the account menu and on the login card. */
+/* 界面语言: a two-way segmented choice, in 系统设置 and on the login card. */
 .language-options {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -15666,6 +15666,38 @@ body.is-resizing-agent { user-select: none; }
 
 .appearance-hint {
   margin: 0;
+}
+
+/* 个人偏好 in 系统设置 (#123): the row title names the choice, so the chooser's own label goes. */
+.settings-choice > .account-menu-label {
+  display: none;
+}
+
+.settings-choice.appearance-chooser > .account-menu-label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 0;
+}
+
+.settings-choice.appearance-chooser > .account-menu-label small {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.settings-choice .language-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+}
+
+.settings-choice .language-option {
+  min-width: 96px;
+  padding: 7px 14px;
+}
+
+.settings-choice .palette-row {
+  padding: 10px 0 0;
 }
 
 .appearance-chooser .account-menu-label small {
