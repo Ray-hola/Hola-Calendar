@@ -5207,8 +5207,12 @@ const memberShelfCard=p=>`<article class="achievement-card" data-project="${esca
 const ACHIEVEMENT_LINK=/https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]+/g;
 /* A link ends before trailing punctuation and before a ) it did not open; what was cut stays in the sentence. */
 function achievementLinkSplit(raw){
-  let url=raw.replace(/[.,;:!?]+$/,'');
-  while(url.endsWith(')')&&(url.match(/\(/g)||[]).length<(url.match(/\)/g)||[]).length)url=url.slice(0,-1);
+  let url=raw,prev;
+  do{
+    prev=url;url=url.replace(/[.,;:!?]+$/,'');
+    let extra=(url.match(/\)/g)||[]).length-(url.match(/\(/g)||[]).length;
+    while(extra>0&&url.endsWith(')')){url=url.slice(0,-1);extra--}
+  }while(url!==prev);
   return [url,raw.slice(url.length)];
 }
 /* The host the browser will really open, not what sits before an @. */
@@ -5219,8 +5223,11 @@ function achievementTaskHTML(t){
   const links=[];
   const note=text.replace(ACHIEVEMENT_LINK,m=>m.split(/,(?=https?:\/\/)/).map(part=>{
     const [url,tail]=achievementLinkSplit(part);if(!achievementHost(url))return part;
-    if(!links.includes(url))links.push(url);return tail;
-  }).join('')).replace(/[（(]\s*[）)]/g,'').replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').replace(/ ([，。；、！？.,;:!?])/g,'$1').trim();
+    if(!links.includes(url))links.push(url);return '\u0001'+tail;
+  }).join(''))
+    /* Only where a link came out: brackets left empty, and the space before it. */
+    .replace(/[（(]\s*\u0001\s*[）)]/g,'').replace(/\u0001[ \t]+(?=[，。；、！？：）」])/g,'\u0001').replace(/[ \t]*\u0001/g,'')
+    .replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').trim();
   const name=who?nameOf(who):'—',said=tr(ACHIEVEMENT_SAID[t.completionFeeling]||'{0}说',name);
   const words=done&&(note||ACHIEVEMENT_SAID[t.completionFeeling])?`<p>${escapeHTML(note?tr('{0}：{1}',said,note):said)}</p>`:'';
   return `<li><div><b>${escapeHTML(t.name)}</b><span>${escapeHTML(name)} · ${done?`${tr('已完成')} ✅`:status(t)[1]}</span>`
