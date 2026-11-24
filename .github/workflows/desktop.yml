@@ -1,0 +1,106 @@
+name: Desktop apps
+
+# Builds and tests the macOS and Windows desktop apps on every change to
+# desktop/, and on a `desktop-v*` tag publishes both as one GitHub release.
+on:
+  push:
+    tags: ['desktop-v*']
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop/macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: |
+          want="${GITHUB_REF_NAME#desktop-v}"
+          got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          [ "$want" = "$got" ] || { echo "tag says $want, Info.plist says $got"; exit 1; }
+      - name: Unit tests
+        run: scripts/build.sh test
+      - name: Build the universal app
+        run: scripts/build.sh
+      - name: Integration test against server.py
+        run: scripts/integration-test.sh
+      - name: Package
+        run: |
+          ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          lipo -archs "build/哗啦待办.app/Contents/MacOS/HolaDesktop"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          # ditto keeps the bundle, its signature and the Chinese file name intact.
+          ditto -c -k --sequesterRsrc --keepParent "build/哗啦待办.app" "$GITHUB_WORKSPACE/dist/Hola-Desktop-macOS-$ver-universal.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows app
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: |
+          $want = $env:GITHUB_REF_NAME -replace '^desktop-v', ''
+          $got = ([xml](Get-Content desktop\windows\Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ($want -ne $got) { Write-Error "tag says $want, Directory.Build.props says $got"; exit 1 }
+      - name: Unit tests
+        run: |
+          & desktop\windows\scripts\build.ps1 test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build
+        run: |
+          & desktop\windows\scripts\build.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Integration test against server.py
+        run: |
+          & desktop\windows\scripts\integration-test.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Package
+        run: |
+          $ver = ([xml](Get-Content desktop\windows\Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item desktop\windows\build\哗啦待办-windows.zip "dist\Hola-Desktop-Windows-$ver.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${GITHUB_REF_NAME#desktop-v}"
+          cd dist && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt && cd ..
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --prerelease \
+            --title "哗啦待办 桌面 App $ver（macOS / Windows）" --notes-file desktop/release-notes.md
