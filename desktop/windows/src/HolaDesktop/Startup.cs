@@ -19,6 +19,13 @@ namespace Hola.Desktop
         public static string ExePath => Process.GetCurrentProcess().MainModule.FileName;
         static string Command => "\"" + ExePath + "\"";
 
+        /// <summary>
+        /// Run straight from the zip, Explorer starts a copy in %TEMP% that is
+        /// cleaned away later; nothing may be registered to point there.
+        /// </summary>
+        public static bool RunningFromTemp =>
+            ExePath.StartsWith(System.IO.Path.GetFullPath(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase);
+
         /// <summary>On when the Run entry starts this very exe and Task Manager has not switched it off.</summary>
         public static bool LaunchAtLoginEnabled
         {
@@ -38,6 +45,7 @@ namespace Hola.Desktop
 
         public static void SetLaunchAtLogin(bool on)
         {
+            if (on && RunningFromTemp) throw new InvalidOperationException("App 是从压缩包里直接打开的，请先解压到固定位置再开启");
             using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
             {
                 if (on) run.SetValue(Name, Command, RegistryValueKind.String); else run.DeleteValue(Name, false);
@@ -52,6 +60,7 @@ namespace Hola.Desktop
         /// </summary>
         public static void RegisterLinkHandler()
         {
+            if (RunningFromTemp) return;
             try
             {
                 using (var root = Registry.CurrentUser.CreateSubKey(ProtocolKey))

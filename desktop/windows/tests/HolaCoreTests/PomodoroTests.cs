@@ -100,6 +100,9 @@ namespace Hola.Tests
                     Eq(back.EndsAt.Value.Kind, DateTimeKind.Utc);
                     Eq(Pomodoro.FromJson(new Settings(Path.Combine(dir, "none.json")).GetObject(Pomodoro.SettingsKey)), Pomodoro.Fresh(PomoMode.Focus));
                     Eq(Pomodoro.FromJson(new Dictionary<string, object> { ["mode"] = "nap", ["left"] = 3 }), Pomodoro.Fresh(PomoMode.Focus));
+                    // A damaged end time must not stop the app from starting.
+                    foreach (var bad in new[] { "NaN", "Infinity", "1e300", "-5", "soon" })
+                        Eq(Pomodoro.FromJson(new Dictionary<string, object> { ["mode"] = "rest", ["left"] = 3, ["endsAt"] = bad }), Pomodoro.Fresh(PomoMode.Focus));
                 }
                 finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
             });

@@ -111,9 +111,15 @@ namespace Hola.Desktop
             input.VerticalContentAlignment = VerticalAlignment.Center;
             var hint = Text(prompt, theme.Body, theme.Muted);
             hint.IsHitTestVisible = false; hint.Margin = new Thickness(3, 0, 0, 0); hint.VerticalAlignment = VerticalAlignment.Center;
-            void Sync() => hint.Visibility = (input is TextBox tb ? tb.Text : ((PasswordBox)input).Password).Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (input is TextBox box) box.TextChanged += (_, __) => Sync(); else ((PasswordBox)input).PasswordChanged += (_, __) => Sync();
-            Sync();
+            // The inputs outlive each redraw; they hold only the newest hint, and are wired to it once.
+            var first = !(input.Tag is TextBlock);
+            input.Tag = hint;
+            if (first)
+            {
+                if (input is TextBox box) box.TextChanged += (_, __) => SyncHint(input);
+                else ((PasswordBox)input).PasswordChanged += (_, __) => SyncHint(input);
+            }
+            SyncHint(input);
             var grid = new Grid();
             grid.Children.Add(hint); grid.Children.Add(input);
             return new Border
@@ -121,6 +127,13 @@ namespace Hola.Desktop
                 Child = grid, Padding = new Thickness(4), CornerRadius = new CornerRadius(theme.IsTempo ? 0 : 6),
                 Background = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)), BorderBrush = theme.Line, BorderThickness = new Thickness(1),
             };
+        }
+
+        static void SyncHint(Control input)
+        {
+            if (!(input.Tag is TextBlock hint)) return;
+            var text = input is TextBox tb ? tb.Text : ((PasswordBox)input).Password;
+            hint.Visibility = text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public static StackPanel Row(double spacing, params UIElement[] items)

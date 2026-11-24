@@ -25,12 +25,20 @@ namespace Hola.Core
         {
             // .NET Framework only lets an app pick TLS 1.2+ this way when it targets 4.7+; 4.8 does, so the OS default is used.
             ServicePointManager.SecurityProtocol = SecurityProtocolType.SystemDefault;
+            // The server answers at once; waiting for `100 Continue` would only delay every POST.
+            ServicePointManager.Expect100Continue = false;
         }
 
         public HolaApi(string baseUrl, HttpMessageHandler handler = null)
         {
             BaseUrl = baseUrl;
-            var h = handler ?? new HttpClientHandler { UseCookies = false, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate };
+            var h = handler ?? new HttpClientHandler
+            {
+                UseCookies = false,
+                // The API never redirects; following one would send the session cookie along, maybe over plain http.
+                AllowAutoRedirect = false,
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            };
             http = new HttpClient(h, disposeHandler: handler == null) { Timeout = TimeSpan.FromSeconds(15) };
         }
 
@@ -126,6 +134,8 @@ namespace Hola.Core
             catch (HttpRequestException e) { throw new ApiException(ApiErrorKind.Offline, (e.InnerException ?? e).Message); }
             catch (TaskCanceledException) { throw new ApiException(ApiErrorKind.Offline, "连接服务器超时"); }
             catch (WebException e) { throw new ApiException(ApiErrorKind.Offline, e.Message); }
+            // Anything else on the way (a bad charset, a broken stream) is the network too, as in the macOS client.
+            catch (Exception e) when (!(e is ApiException)) { throw new ApiException(ApiErrorKind.Offline, e.Message); }
         }
 
         internal static void Check(Reply r)

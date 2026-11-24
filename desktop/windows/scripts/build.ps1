@@ -24,6 +24,8 @@ function Stop-App {
 }
 
 function Build-All {
+  # A running copy holds the exe open, and the copy below would fail.
+  Stop-App
   New-Item -ItemType Directory -Force $Build | Out-Null
   & (Join-Path $PSScriptRoot 'make-icon.ps1') (Join-Path $Build 'app.ico')
   Compile 'src\HolaDesktop'
@@ -43,10 +45,9 @@ switch ($Action) {
     exit $LASTEXITCODE
   }
   'build' { Build-All }
-  'run' { Build-All; Stop-App; Start-Process (Join-Path $Build "$Name.exe") }
+  'run' { Build-All; Start-Process (Join-Path $Build "$Name.exe") }
   'install' {
     Build-All
-    Stop-App
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
     $exe = Join-Path $InstallDir "$Name.exe"
     Copy-Item (Join-Path $Build "$Name.exe") $exe -Force

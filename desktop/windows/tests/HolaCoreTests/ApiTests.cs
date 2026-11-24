@@ -111,6 +111,9 @@ namespace Hola.Tests
             {
                 Stub.Handler = null;
                 await Throws(new ApiException(ApiErrorKind.Offline), () => Client().State("tok"));
+                // Any other failure on the way counts as the network too, so connect still tries the next address.
+                Stub.Handler = _ => throw new System.InvalidOperationException("bad charset");
+                await Throws(new ApiException(ApiErrorKind.Offline), () => Client().State("tok"));
             });
         }
     }

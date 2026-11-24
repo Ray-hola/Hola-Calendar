@@ -22,6 +22,8 @@ struct PopoverView: View {
         .foregroundStyle(theme.ink)
         .font(theme.body)
         .onAppear { state.refreshIfStale(); state.refreshLaunchAtLogin() }
+        // A typed password belongs to the server it was typed for, never to the next one.
+        .onChange(of: state.account) { _ in password = "" }
     }
 
     // MARK: Header

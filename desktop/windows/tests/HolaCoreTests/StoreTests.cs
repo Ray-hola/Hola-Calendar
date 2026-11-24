@@ -41,6 +41,27 @@ namespace Hola.Tests
                 Eq(b.Host, "192.168.1.8:4173");
             });
 
+            await Test("settings survive a write cut short", () =>
+            {
+                var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "hola-tests-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var file = System.IO.Path.Combine(dir, "settings.json");
+                    var s = new Settings(file);
+                    s.Set("server", "https://a.example.com");
+                    s.Set("username", "ray");
+                    Eq(new Settings(file).Get("username"), "ray");
+                    Check(System.IO.File.Exists(file + ".bak"), "the write before is kept");
+                    Check(!System.IO.File.Exists(file + ".tmp"), "no temp file is left");
+                    // A power cut can leave the file zero-filled: the copy from the write before takes over.
+                    System.IO.File.WriteAllBytes(file, new byte[64]);
+                    Eq(new Settings(file).Get("server"), "https://a.example.com");
+                    s.Set("look", null);
+                    Eq(new Settings(file).Get("username"), "ray");
+                }
+                finally { if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true); }
+            });
+
             await Test("session tokens round-trip through Credential Manager", () =>
             {
                 var account = "https://hola-tests-" + Guid.NewGuid().ToString("N") + ".example";

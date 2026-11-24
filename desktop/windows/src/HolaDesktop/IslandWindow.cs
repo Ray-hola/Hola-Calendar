@@ -42,6 +42,7 @@ namespace Hola.Desktop
             MouseLeave += (_, __) => SetExpanded(false);
             MouseLeftButtonUp += (_, __) => state.PomoToggle();
             SourceInitialized += (_, __) => NoActivate();
+            Closing += (_, e) => { if (!Program.Quitting) e.Cancel = true; };
             state.Changed += Update;
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, __) => Dispatcher.BeginInvoke(new Action(Place));
             Update();

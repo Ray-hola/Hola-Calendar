@@ -2,7 +2,7 @@
 # temp database, signs in with a seeded account through holactl (the same core
 # the app uses), lists today's to-dos, completes one, then confirms the
 # server's refusals (409 on a repeat, 403 for the admin account) come back as
-# readable messages. Credential Manager is not touched (tokens via HOLA_TOKEN).
+# readable messages. Credential Manager is not read (tokens via HOLA_TOKEN).
 #   scripts/integration-test.ps1   (expects scripts/build.ps1 to have produced build\holactl.exe)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
@@ -27,12 +27,14 @@ try {
   if (-not $up) { Get-Content "$Work\server.err"; Write-Host 'server did not start'; exit 1 }
   $accounts = @{}
   Get-Content "$Work\initial-accounts.txt" -Encoding UTF8 | ForEach-Object { $f = $_ -split "`t"; if ($f.Count -ge 2) { $accounts[$f[0]] = $f[1] } }
+  foreach ($u in 'test001', 'superadmin') { if (-not $accounts[$u]) { Write-Host "no seeded password for $u"; exit 1 } }
   $url = "127.0.0.1:$Port"
 
   function Ctl([string]$token, [string]$password) {
     $ErrorActionPreference = 'Continue'   # holactl's own errors arrive on stderr
-    $env:HOLA_TOKEN = $token; $env:HOLA_PASSWORD = $password
-    $out = & $Ctl @args 2>&1 | ForEach-Object { "$_" }
+    # An empty value would unset the variable and send holactl to Credential Manager or a password prompt.
+    $env:HOLA_TOKEN = if ($token) { $token } else { '-' }; $env:HOLA_PASSWORD = if ($password) { $password } else { '-' }
+    $out = $null | & $Ctl @args 2>&1 | ForEach-Object { "$_" }
     Remove-Item env:HOLA_TOKEN, env:HOLA_PASSWORD -ErrorAction SilentlyContinue
     return ($out -join "`n")
   }
@@ -83,7 +85,8 @@ try {
   Expect 'offline message' (Ctl 'x' '' today '127.0.0.1:1') 'error:'
 }
 finally {
-  Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+  # The py launcher starts python.exe as a child, so the whole tree goes.
+  & taskkill /T /F /PID $server.Id 2>&1 | Out-Null
   Start-Sleep -Milliseconds 300
   Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -17,6 +17,10 @@ namespace Hola.Desktop
 
         // Tasks
 
+        ScrollViewer taskList;
+        /// <summary>Where the list was scrolled to before a redraw, so ticking a task does not jump it to the top.</summary>
+        double taskScroll;
+
         UIElement TaskSection()
         {
             var panel = new StackPanel();
@@ -37,7 +41,10 @@ namespace Hola.Desktop
             {
                 var list = new StackPanel();
                 foreach (var t in state.Tasks) list.Children.Add(TaskRow(t));
-                panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) });
+                taskList = new ScrollViewer { Content = list, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
+                var keep = taskScroll;
+                taskList.Loaded += (_, __) => taskList.ScrollToVerticalOffset(keep);
+                panel.Children.Add(taskList);
             }
             var n = Notice(2); n.Margin = new Thickness(0, 6, 0, 0);
             panel.Children.Add(n);

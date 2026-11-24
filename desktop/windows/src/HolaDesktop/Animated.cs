@@ -52,7 +52,7 @@ namespace Hola.Desktop
     static class Mascot
     {
         public static FrameworkElement Make(Look look, Mood mood, double size, bool dark = false) =>
-            look == Look.Anthropic ? new CardBuddy(mood, size) : (FrameworkElement)new PixelSprite(mood, size, dark);
+            look == Look.Anthropic ? new CardBuddy(mood, size, dark ? 12 : 24) : (FrameworkElement)new PixelSprite(mood, size, dark);
     }
 
     /// <summary>Progress: a thin terracotta capsule (Anthropic风). Tempo风 uses the ASCII text instead.</summary>

@@ -53,6 +53,8 @@ namespace Hola.Desktop
             Deactivated += (_, __) => Hide();
             SizeChanged += (_, __) => Place();
             IsVisibleChanged += (_, __) => { if (!IsVisible) HiddenAt = DateTime.UtcNow; };
+            // Alt+F4 hides the panel like a click elsewhere; it is only really closed when the app quits.
+            Closing += (_, e) => { if (!Program.Quitting) { e.Cancel = true; Hide(); } };
             state.Changed += Render;
         }
 
@@ -65,7 +67,7 @@ namespace Hola.Desktop
             // Drawn off screen first, so it never flashes old content or the wrong size.
             Left = -32000; Top = -32000;
             Show();
-            builtKey = null;
+            builtKey = null; taskList = null; taskScroll = 0;
             Render();
             UpdateLayout();
             Place();
@@ -89,14 +91,19 @@ namespace Hola.Desktop
             Top = Math.Max(area.Top / scale - Shadow + 8, Math.Min(top, area.Bottom / scale - h + Shadow - 8));
         }
 
+        string passwordFor;
+
         void Render()
         {
+            // A typed password belongs to the server it was typed for, never to the next one.
+            if (passwordFor != state.Account) { passwordFor = state.Account; passBox.Clear(); }
             // A hidden panel is rebuilt when it next opens.
             if (!IsVisible) { builtKey = null; return; }
             var key = LayoutKey();
             if (key != builtKey)
             {
                 var focused = Keyboard.FocusedElement;
+                taskScroll = taskList?.VerticalOffset ?? 0;
                 builtKey = key;
                 Build();
                 if (focused == serverBox || focused == userBox || focused == passBox) Dispatcher.BeginInvoke(new Action(() => ((Control)focused).Focus()));
@@ -119,7 +126,7 @@ namespace Hola.Desktop
             frame.Background = T.Paper; frame.BorderBrush = T.Line; frame.CornerRadius = new CornerRadius(T.IsTempo ? 0 : 12);
             TextElement(frame);
             root.Children.Clear();
-            statusText = noticeText = null; connectBtn = loginBtn = null;
+            statusText = noticeText = null; connectBtn = loginBtn = null; taskList = null;
             Add(Header());
             Add(PomodoroSection());
             Add(state.ConnectScreen ? ConnectSection() : state.SignedIn ? TaskSection() : SignInSection());

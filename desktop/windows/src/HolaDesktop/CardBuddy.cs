@@ -16,18 +16,25 @@ namespace Hola.Desktop
     sealed class CardBuddy : Animated
     {
         readonly Mood mood;
+        readonly double fps;
+        long drawn = -1;
 
-        public CardBuddy(Mood mood, double size)
+        public CardBuddy(Mood mood, double size, double fps = 24)
         {
-            this.mood = mood; Width = size; Height = size;
+            this.mood = mood; this.fps = fps; Width = size; Height = size;
             ToolTip = null;
             System.Windows.Automation.AutomationProperties.SetName(this, mood == Mood.Rest ? "小卡在休息" : mood == Mood.Focus ? "小卡在专注" : "小卡");
         }
 
         static Brush A(Color c, double alpha) { var b = new SolidColorBrush(Color.FromArgb((byte)(alpha * 255), c.R, c.G, c.B)); b.Freeze(); return b; }
 
+        long Frame => (long)Math.Floor(Seconds * fps);
+
+        protected override bool Moved() => Frame != drawn;
+
         protected override void OnRender(DrawingContext g)
         {
+            drawn = Frame;
             var t = Seconds;
             double sw = ActualWidth, sh = ActualHeight;
             Color ink = Theme.InkColor, accent = Theme.TerracottaColor;

@@ -82,7 +82,7 @@ namespace Hola.Desktop
             var sync = m.Items.Add("立即同步", null, (_, __) => _ = state.Refresh());
             sync.Enabled = state.SignedIn;
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("退出 哗啦待办", null, (_, __) => System.Windows.Application.Current.Shutdown());
+            m.Items.Add("退出 哗啦待办", null, (_, __) => Program.Quit());
         }
 
         public void Dispose()

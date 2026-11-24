@@ -32,7 +32,7 @@ namespace Hola.Desktop
         /// <summary>What is typed on the 连接 screen.</summary>
         public string ServerText = "";
         string username;
-        public string Username { get => username; set { username = value ?? ""; settings.Set("username", username); Notify(); } }
+        public string Username { get => username; set { username = value ?? ""; SaveUsernameSoon(); Notify(); } }
         ConnectedServer server;
         /// <summary>The server this app talks to; null until the first 连接.</summary>
         public ConnectedServer Server { get => server; private set { server = value; settings.Set("server", value?.Url); } }
@@ -101,6 +101,28 @@ namespace Hola.Desktop
 
         /// <summary>Lets the views say a field they own changed (typing in a box).</summary>
         public void Touch() => Notify();
+
+        DispatcherTimer usernameSave;
+
+        /// <summary>The name is typed a key at a time; it is written once typing pauses, not on every key.</summary>
+        void SaveUsernameSoon()
+        {
+            if (usernameSave == null)
+            {
+                usernameSave = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMilliseconds(600) };
+                usernameSave.Tick += (_, __) => Flush();
+            }
+            usernameSave.Stop();
+            usernameSave.Start();
+        }
+
+        /// <summary>Writes anything still waiting; called on quit too.</summary>
+        public void Flush()
+        {
+            if (usernameSave == null || !usernameSave.IsEnabled) return;
+            usernameSave.Stop();
+            settings.Set("username", username);
+        }
 
         /// <summary>A request whose answer nobody waits for; its failure is dropped on purpose.</summary>
         static void Fire(System.Threading.Tasks.Task t) =>

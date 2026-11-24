@@ -90,7 +90,7 @@ namespace Hola.Desktop
                 sync.Margin = new Thickness(6, 0, 0, 0);
                 left.Children.Add(sync);
             }
-            var quit = Ui.Button(T, T.Bracket("退出"), () => Application.Current.Shutdown());
+            var quit = Ui.Button(T, T.Bracket("退出"), Program.Quit);
             var actions = Spread(left, quit);
             actions.Margin = new Thickness(0, 6, 0, 0);
             panel.Children.Add(actions);
@@ -117,6 +117,8 @@ namespace Hola.Desktop
                 noticeText.Text = n == null ? "" : T.IsTempo && (s.ConnectScreen || s.SignedIn) ? "> " + n : n;
                 noticeText.Visibility = string.IsNullOrEmpty(n) ? Visibility.Collapsed : Visibility.Visible;
             }
+            // A link that arrives while the connect screen is open replaces what the box shows.
+            if (connectBtn != null && serverBox.Text != s.ServerText) { serverBox.Text = s.ServerText; serverBox.CaretIndex = serverBox.Text.Length; }
             if (connectBtn != null)
             {
                 Ui.Caption(connectBtn, T, T.Bracket(s.Connecting ? "连接中…" : "连接"));

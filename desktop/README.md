@@ -124,12 +124,12 @@ scripts\integration-test.ps1      # 端到端：临时起 server.py，登录、�
 - **Touch Bar** 在 Windows 上没有对应的东西，没做。
 - **登录状态**只存在 Windows 凭据管理器里（控制面板 → 凭据管理器 → Windows 凭据，名称是 `cn.hola.desktop.session:<服务器地址>`），不写文件。服务器地址、用过的服务器、用户名、风格、番茄钟状态存在 `%LOCALAPPDATA%\HolaDesktop\settings.json`。
 - **开机时启动**写在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，任务管理器「启动应用」里能看到、能关；在那里关掉后，面板里的勾也显示为关。
-- **`hola://` 链接**：每次启动都把 `HKCU\Software\Classes\hola` 指向当前这个 exe，网页版「在桌面 App 中打开」就能找到它。同一账户只运行一份：再打开 exe 或点链接时，地址交给已经运行的那份，并打开面板。
+- **`hola://` 链接**：每次启动都把 `HKCU\Software\Classes\hola` 指向当前这个 exe，网页版「在桌面 App 中打开」就能找到它。同一账户只运行一份：再打开 exe 或点链接时，地址交给已经运行的那份，并打开面板。所以解压后要先打开一次 exe，网页上的链接才能用。直接在压缩包里双击打开时，Windows 会把它放进临时文件夹运行，这时不登记链接，也不能开启开机自启。
 - 休眠时停表、唤醒后立即同步；轮询、离线、401、服务器拒绝的处理与 Mac 版一致（状态逻辑逐行移植）。
 
 已验证（本机 Windows 11，.NET SDK 7.0.304）：
 
-- `scripts\build.ps1`：0 警告。`scripts\build.ps1 test`：187 项断言全部通过（番茄钟、今日筛选、API 请求头/Cookie/错误映射、连接与地址判断、服务器列表、凭据管理器读写）。
+- `scripts\build.ps1`：0 警告。`scripts\build.ps1 test`：198 项断言全部通过（番茄钟、今日筛选、API 请求头/Cookie/错误映射、连接与地址判断、服务器列表、设置文件断电恢复、凭据管理器读写）。
 - `scripts\integration-test.ps1`：全部通过。
 - 用 UI 自动化在演示服务器上走了一遍：连接 → 登录 → 勾选完成 → 开始番茄钟（岛出现）→ 切到 Tempo风 → 退出重开（登录、风格、运行中的番茄钟都恢复）→ 打开 `hola://connect` 链接（已运行的那份填好了地址）→ 开机自启开关（注册表随之写入和删除）。常驻工作集约 110 MB。
 
