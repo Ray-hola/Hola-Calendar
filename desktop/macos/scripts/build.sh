@@ -85,7 +85,10 @@ fi
 
 echo "→ lipo ($ARCHS)"
 for bin in libHolaCore.dylib holactl HolaDesktop; do
-  lipo -create $(for arch in $ARCHS; do echo "$OUT/$arch/$bin"; done) -output "$OUT/$bin"
+  # An array keeps each path whole when the checkout path has spaces in it.
+  inputs=()
+  for arch in $ARCHS; do inputs+=("$OUT/$arch/$bin"); done
+  lipo -create "${inputs[@]}" -output "$OUT/$bin"
 done
 
 APP="$OUT/$APP_NAME.app"
