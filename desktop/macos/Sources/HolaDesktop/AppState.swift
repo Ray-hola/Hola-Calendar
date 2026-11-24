@@ -57,6 +57,8 @@ import ServiceManagement
     private var connectChoice = 0
     /// Servers dropped with 移除 while a sign-in to them may still be on its way.
     private var forgotten: Set<String> = []
+    /// Bumped by every sign-in and sign-out, so only the newest sign-in can still count late.
+    private var attempt = 0
 
     /// Idle poll interval. The server's own scheduler runs every 30 s, so
     /// nothing is gained by asking more often than this.
@@ -187,6 +189,8 @@ import ServiceManagement
         guard !username.isEmpty, !password.isEmpty else { notice = "请输入账户和密码"; return }
         let client = HolaAPI(baseURL: url), asked = choice, account = username
         let name = server?.info?.name ?? serverName
+        attempt += 1
+        let mine = attempt
         syncing = true
         var token: String?, failure: String?
         do {
@@ -197,19 +201,23 @@ import ServiceManagement
             failure = error.localizedDescription
         }
         let key = url.absoluteString
-        // The same server picked again meanwhile, with no other sign-in under way: this one still counts.
-        let again = choice != asked && key == server?.url.absoluteString && !signedIn && !syncing && !forgotten.contains(key)
+        // The same server picked again meanwhile, with no newer sign-in or sign-out since: this one still counts.
+        let again = choice != asked && key == server?.url.absoluteString && !signedIn && attempt == mine && !forgotten.contains(key)
         guard choice == asked || again else {
             guard let t = token else { return }
             // Another server was picked: keep this session for when it is picked again.
-            // It is closed instead if this server was 移除'd, or is current and signed in another way.
+            // It is closed instead if this server was 移除'd, or is current and signed in or out another way.
+            let kept = Keychain.load(account: key)
             if forgotten.contains(key) || key == server?.url.absoluteString || (try? Keychain.save(token: t, account: key)) == nil {
                 Concurrency.Task { try? await client.logout(token: t) }
             } else {
+                // A session kept from an earlier late sign-in is replaced, so it is closed too.
+                if let kept, kept != t { Concurrency.Task { try? await client.logout(token: kept) } }
                 remember(SavedServer(url: key, name: name, username: account))
             }
             return
         }
+        if again { username = account }
         syncing = false
         if let t = token {
             do {
@@ -229,6 +237,7 @@ import ServiceManagement
     }
 
     func signOut() {
+        attempt += 1
         let old = (api, token)
         stopPolling()
         if let url = old.0?.baseURL { Keychain.delete(account: url.absoluteString) }
