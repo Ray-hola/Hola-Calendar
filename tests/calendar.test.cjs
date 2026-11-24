@@ -1645,6 +1645,32 @@ test('nothing takes the focus from a field being typed in: the tour waits, the v
   assert.match(source,/const typing=document\.activeElement===input,from=input\.selectionStart,to=input\.selectionEnd;\s*input\.before\(wrapper\);wrapper\.append\(input\);\s*if\(typing\)\{input\.focus/);
 });
 
+test('a 项目背景 save that finishes after a redraw marks the live editor only if it still carries that save (#117)',async()=>{
+  const a=app(),node=(extra={})=>({dataset:{},classList:{toggle(){}},isConnected:true,...extra});
+  const oldEditor=node(),oldBg=node({tagName:'TEXTAREA',value:'X'}),btn=node();
+  const els={'#spaceBackgroundEditor':oldEditor,'#spaceBackground':oldBg,'#saveBackground':btn};
+  a.context.document={querySelector:s=>els[s]||null,querySelectorAll:()=>[]};
+  let finish;a.context.api=()=>new Promise(r=>{finish=r});
+  a.run(`var toasts=[];toast=m=>toasts.push(m);bindMdEditor=()=>{};UI.space='A';`);
+  const p={id:'A',background:'old'};a.context.p=p;
+  const swap=pending=>{const liveEditor=node({dataset:{saved:'old',...(pending?{pending}:{})}}),liveBg=node({tagName:'TEXTAREA',value:'XY'});
+    liveBg.oninput=()=>{liveBg.synced=true};oldBg.isConnected=false;Object.assign(els,{'#spaceBackgroundEditor':liveEditor,'#spaceBackground':liveBg});return {liveEditor,liveBg}};
+  oldEditor.dataset={};a.run('bindProjectSpace(p)');
+  let clicked=btn.onclick();let live=swap('X');finish({});await clicked;
+  assert.equal(live.liveEditor.dataset.saved,'X','the live editor learns the save it carried');
+  assert.equal(live.liveEditor.dataset.pending,undefined);assert.ok(live.liveBg.synced);
+  Object.assign(els,{'#spaceBackgroundEditor':oldEditor,'#spaceBackground':oldBg});oldBg.isConnected=true;a.run('bindProjectSpace(p)');
+  clicked=btn.onclick();live=swap(undefined);finish({});await clicked;
+  assert.equal(live.liveEditor.dataset.saved,'old','a live editor that dropped the draft is left alone');
+  Object.assign(els,{'#spaceBackgroundEditor':oldEditor,'#spaceBackground':oldBg});oldBg.isConnected=true;a.run('bindProjectSpace(p)');
+  a.context.api=()=>Promise.reject(new Error('离线'));
+  clicked=btn.onclick();live=swap('X');await clicked;
+  assert.equal(live.liveEditor.dataset.saved,'old','a failed save marks nothing saved');
+  assert.equal(live.liveEditor.dataset.pending,undefined,'and leaves no stale pending');
+  assert.match(source,/if\(used&&path\.mode==='approval'\)x\.error=tr\('这张卡片的申请已经提交过，等审批结果即可'\);else if\(used\)x\.usedCard=true;/,'a filed request is not renewed');
+  assert.match(source,/if\(x\.state==='done'&&used&&path\.mode==='approval'\)\{results\.failed--;results\.approval\+\+\}/,'and is counted as a request');
+});
+
 test('empty files are skipped before upload, from a drop or the picker (#117)',async()=>{
   const a=app(),sent=[];
   a.context.fetch=async(path,options)=>{sent.push(options.headers['X-File-Name']);return {ok:true,text:async()=>'{}'}};

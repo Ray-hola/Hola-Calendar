@@ -2396,10 +2396,13 @@ function bindProjectSpace(p){
     btn.onclick=async()=>{
       if(saving)return;
       const submitted=docText(bg);saving=true;sync();if(editor?.dataset)editor.dataset.pending=submitted;
-      if(await save({background:submitted})){
+      const ok=await save({background:submitted});
+      /* Redrawn meanwhile: the live editor is told only if it still carries this save. */
+      const liveEditor=bg.isConnected===false&&UI.space===p.id?$('#spaceBackgroundEditor'):null;
+      const carried=liveEditor?.dataset?.pending===submitted?liveEditor:null,live=carried?$('#spaceBackground'):bg;
+      if(carried){delete carried.dataset.pending;if(ok)carried.dataset.saved=submitted;live?.oninput?.()}
+      if(ok){
         saved=submitted;if(editor?.dataset)editor.dataset.saved=saved;
-        const live=bg.isConnected===false&&UI.space===p.id?$('#spaceBackground'):bg,liveEditor=$('#spaceBackgroundEditor');
-        if(live&&live!==bg&&liveEditor?.dataset){liveEditor.dataset.saved=submitted;delete liveEditor.dataset.pending;live.oninput?.()}
         toast(docText(live||bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
       }
       saving=false;if(editor?.dataset)delete editor.dataset.pending;sync();
@@ -7544,7 +7547,8 @@ async function planSubmit(board,items=null){
       const used=e?.status===409&&/已执行/.test(String(e.raw??e.message??''));
       if(used&&path.mode==='approval')x.error=tr('这张卡片的申请已经提交过，等审批结果即可');else if(used)x.usedCard=true;
       if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);
-        if(x.state==='done'&&used){x.result=tr('此前已执行；这次的修改没有提交');results.failed--;results.used++}else if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
+        if(x.state==='done'&&used&&path.mode==='approval'){results.failed--;results.approval++}
+        else if(x.state==='done'&&used){x.result=tr('此前已执行；这次的修改没有提交');results.failed--;results.used++}else if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{
