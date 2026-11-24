@@ -1670,6 +1670,13 @@ test('a 项目背景 save that finishes after a redraw marks the live editor onl
   assert.equal(live.liveEditor.dataset.saved,'old','a live editor that dropped the draft is left alone');
   assert.equal(refreshed,1,'but is redrawn with what the server now holds');
   Object.assign(els,{'#spaceBackgroundEditor':oldEditor,'#spaceBackground':oldBg});oldBg.isConnected=true;a.run('bindProjectSpace(p)');
+  a.context.refresh=async()=>{refreshed++;throw new Error('离线')};
+  clicked=btn.onclick();live=swap('B');live.liveBg.value='old';oldBg.value='X改';finish({});await clicked;await new Promise(r=>setImmediate(r));
+  assert.equal(refreshed,2,'a newer save whose text was undone back is redrawn too');
+  assert.equal(live.liveEditor.dataset.pending,'B','without touching its mark');
+  assert.equal(a.json('toasts').at(-1),'项目背景已保存','the toast matches the redraw, not the dropped editor');
+  oldBg.value='X';
+  Object.assign(els,{'#spaceBackgroundEditor':oldEditor,'#spaceBackground':oldBg});oldBg.isConnected=true;a.run('bindProjectSpace(p)');
   a.context.api=()=>Promise.reject(new Error('离线'));
   clicked=btn.onclick();live=swap('X');await clicked;
   assert.equal(live.liveEditor.dataset.saved,'old','a failed save marks nothing saved');

@@ -2402,10 +2402,11 @@ function bindProjectSpace(p){
       const carried=liveEditor?.dataset?.pending===submitted?liveEditor:null,live=carried?$('#spaceBackground'):bg;
       if(carried){delete carried.dataset.pending;if(ok)carried.dataset.saved=submitted;live?.oninput?.()}
       /* Saved after a redraw that left it out: show what the server now holds, unless something new is typed there. */
-      else if(ok&&liveEditor&&docText($('#spaceBackground'))===liveEditor.dataset.saved)refresh().catch(()=>{});
+      const redraw=!carried&&ok&&liveEditor&&docText($('#spaceBackground'))===liveEditor.dataset.saved;
+      if(redraw)refresh().catch(()=>{});
       if(ok){
         saved=submitted;if(editor?.dataset)editor.dataset.saved=saved;
-        toast(docText(live||bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
+        toast(redraw||docText(live||bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
       }
       saving=false;if(editor?.dataset)delete editor.dataset.pending;sync();
     };
