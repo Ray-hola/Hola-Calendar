@@ -65,10 +65,12 @@ async function setLanguage(lang){
   if(S.user){try{await api('/api/action',{action:'profile.language',data:{lang}})}catch(e){toast(e.message);return}}
   try{localStorage.setItem(LANG_KEY,lang)}catch(_){}
   if(lang!==LANG){
+    try{if(UI.view==='settings')sessionStorage.setItem(RETURN_VIEW_KEY,'settings')}catch(_){}
     const url=new URL(location.href);url.searchParams.delete('lang');url.searchParams.delete('langAuto');
     if(url.href!==location.href)location.replace(url.href);else location.reload();
   }
 }
+const RETURN_VIEW_KEY='hola-return-view';
 /* The account's saved language wins over this browser's, except while ?lang= is in the address. */
 function autoLang(){try{return new URLSearchParams(location.search).has('langAuto')}catch(_){return false}}
 function syncAccountLanguage(user){
@@ -89,7 +91,7 @@ function syncAccountLanguage(user){
 }
 /* 外观: a theme (Anthropic风 / Tempo风) and one of its palettes. The team
    default lives in settings (S.appearance; admins set it in 系统设置 → 外观);
-   anyone may follow it or pick their own in the account menu, kept in this
+   anyone may follow it or pick their own in 系统设置 › 个人偏好, kept in this
    browser under APPEARANCE_KEY. Both end up as data-theme / data-palette on
    <html>, which an inline script in index.html also sets from storage before
    the stylesheet loads, so a reload never flashes the other theme. The team
@@ -186,6 +188,7 @@ const ICON_PATHS={
   'award':'<circle cx="12" cy="8.5" r="5.5"/><path d="m8.9 13-1.2 7.8 4.3-2.4 4.3 2.4L15.1 13"/>',
   'inbox':'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.4 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.4-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.8 1.1Z"/>',
   'users':'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
+  'user':'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   'search':'<circle cx="11" cy="11" r="7.5"/><path d="m20.5 20.5-4-4"/>',
   'bell':'<path d="M6.5 8.5a5.5 5.5 0 0 1 11 0c0 6 2.5 8 2.5 8H4s2.5-2 2.5-8"/><path d="M10.3 20.5a2 2 0 0 0 3.4 0"/>',
   'sparkles':'<path d="M12 3.5 13.6 8.4 18.5 10 13.6 11.6 12 16.5 10.4 11.6 5.5 10 10.4 8.4Z"/><path d="m18.5 15.5.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z"/>',
@@ -597,7 +600,9 @@ function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUN
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
+  let back='',firstLoad=false;
   if(S.user?.id!==next.user.id){
+    firstLoad=!S.user;
     if(S.user)resetFormDraft();
     cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
@@ -606,7 +611,10 @@ async function refresh(){
   /* updateChatDot is defined further down the file than the unit-test sandbox
      loads, so guard the call rather than assume it is in scope. */
   if(syncAccountLanguage(next.user))return;
+  /* Read only on the load that stays, so a second language reload still comes back. */
+  if(firstLoad){try{back=sessionStorage.getItem(RETURN_VIEW_KEY)||'';sessionStorage.removeItem(RETURN_VIEW_KEY)}catch(_){}}
   S=next;lastStateAt=Date.now();restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();
+  if(back==='settings')switchView('settings');
   if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();
   if(typeof updateChatDot==='function')updateChatDot();
 }
@@ -660,7 +668,7 @@ function switchView(view){
   if(view==='summary')view='archive';
   /* 成果库 lives in the project space now; an old link lands on its shelf. */
   if(view==='achievements'){view='projects';UI.shelf='achievements';UI.space='';UI.folder=''}
-  if((view==='accounts'||view==='settings')&&!S.user?.admin){view='calendar'}
+  if(view==='accounts'&&!S.user?.admin){view='calendar'}
   const changed=UI.view!==view;
   if(changed)cancelMeetingOpen();
   UI.view=view;
@@ -2865,6 +2873,7 @@ const SETTING_DEFAULTS={
    with a way back, instead of crowding the list. */
 const SETTINGS_PAGES={ai:{title:tr('AI 接入与模型'),render:()=>renderAiSettingsPage()},prompt:{title:tr('会议纪要提示词'),render:()=>renderPromptPage()}};
 function openSettingsPage(page){
+  if(!S.user?.admin)return;
   UI.settingsPageNext=SETTINGS_PAGES[page]?page:'';
   if(UI.view!=='settings'){switchView('settings');return}
   UI.settingsPage=UI.settingsPageNext;UI.settingsPageNext='';renderSettings();
@@ -2872,10 +2881,11 @@ function openSettingsPage(page){
   if(!UI.settingsPage)$(`#settingsView [data-settings-page="${page}"]`)?.focus?.();
 }
 function renderSettingsPage(){
+  if(!S.user?.admin){UI.settingsPage='';UI.settingsPageNext=''}
   const page=SETTINGS_PAGES[UI.settingsPage],box=$('#settingsPage');
   $('#settingsView .settings-layout')?.classList?.toggle('hidden',Boolean(page));box?.classList?.toggle('hidden',!page);
   const eyebrow=$('#settingsView .page-intro .eyebrow'),title=$('#settingsView .page-intro h1');
-  if(!page){if(eyebrow)eyebrow.textContent=tr('团队设置');if(title)title.textContent=tr('系统设置');return false}
+  if(!page){if(eyebrow)eyebrow.textContent=S.user?.admin?tr('团队设置'):tr('个人设置');if(title)title.textContent=tr('系统设置');return false}
   if(eyebrow)eyebrow.innerHTML=`<button type="button" class="settings-back" id="settingsBack">${tr('{0}系统设置',icon('chevron-left'))}</button>`;
   if(title)title.textContent=page.title;
   const back=$('#settingsBack');if(back)back.onclick=()=>openSettingsPage('');
@@ -3084,7 +3094,9 @@ function bindAiSettingsPage(box){
 function renderSettings(){
   if(renderSettingsPage())return;
   const admin=Boolean(S.user?.admin),superadmin=S.user?.role==='superadmin';
-  $$('#settingsView .setting-row').forEach(row=>row.classList.toggle('is-forbidden',row.dataset.role==='superadmin'?!superadmin:!admin));
+  $$('#settingsView .setting-row').forEach(row=>row.classList.toggle('is-forbidden',row.dataset.role==='self'?false:row.dataset.role==='superadmin'?!superadmin:!admin));
+  renderPersonalSettings();
+  $('#settingsSearch')?.setAttribute?.('placeholder',admin?tr('搜索设置，例如：补报、规则组、每周'):tr('搜索设置，例如：语言、外观'));
   renderRepeatStackingSetting();
   renderProjectAutomationSetting();
   renderCollectionSchedule();
@@ -3294,7 +3306,7 @@ function renderAppearanceSetting(){
   box.innerHTML=`<div class="appearance-pick"><div class="rule-seg appearance-themes" role="radiogroup" aria-label="${tr('主题')}">`
     +`${Object.entries(THEMES).map(([id,t])=>`<button type="button" class="rule-opt${id===shown?' is-on':''}" role="radio" aria-checked="${id===shown}" data-theme-tab="${id}">${escapeHTML(tr(t.name))}</button>`).join('')}</div>`
     +`<div class="palette-grid" role="radiogroup" aria-label="${tr('配色')}">${palettes.map(p=>paletteSwatchHTML(shown,p)).join('')}</div>`
-    +`<p class="muted appearance-hint">${tr('全员默认的外观；每个人仍可在左上角账户菜单里换成自己的。')}</p></div>`;
+    +`<p class="muted appearance-hint">${tr('全员默认的外观；每个人仍可在「我的外观」里换成自己的。')}</p></div>`;
   box.querySelectorAll('.palette-swatch').forEach(b=>{const on=sameAppearance(team,{theme:b.dataset.pickTheme,palette:b.dataset.pickPalette});b.classList.toggle('is-on',on);b.setAttribute('aria-checked',String(on))});
   /* A theme tab only shows that theme's palettes; the team's look changes once a palette is picked. */
   box.querySelectorAll('[data-theme-tab]').forEach(b=>b.onclick=()=>{box.dataset.theme=b.dataset.themeTab;renderAppearanceSetting()});
@@ -3520,17 +3532,21 @@ function renderAccountMenu(){
   const others=knownAccounts().filter(id=>id!==S.user.id).map(userById).filter(u=>u?.active);
   const head=`<div class="account-menu-head">${avatarHTML(S.user.id,'large')}<div class="account-menu-identity"><strong>${escapeHTML(me.displayName||S.user.id)}</strong>${me.nickname?`<span class="name-tag nick">${escapeHTML(me.nickname)}</span>`:''}<small>${escapeHTML(accountRoleLabel(S.user))}</small></div>${me.signature?`<em class="signature">${escapeHTML(me.signature)}</em>`:''}</div>`;
   const row=(action,label,hint)=>`<button class="account-menu-item" data-action="${action}" role="menuitem">${escapeHTML(label)}${hint?`<small>${escapeHTML(hint)}</small>`:''}</button>`;
-  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${S.user?.admin?row('accounts',tr('账户管理'))+row('settings',tr('系统设置')):''}</div>`;
+  const mine=`<div class="account-menu-group">${row('profile',tr('我的资料'),tr('昵称 / 头像 / 签名'))}${row('password',tr('修改密码'))}${row('desktop',tr('连接桌面 App'),tr('macOS'))}${S.user?.admin?row('accounts',tr('账户管理')):''}${row('settings',tr('系统设置'))}</div>`;
   const switchGroup=`<div class="account-menu-group"><span class="account-menu-label">${tr('切换账户')}</span>${others.map(u=>`<button class="account-menu-item switch" data-user="${escapeHTML(u.id)}" role="menuitem">${avatarHTML(u.id)}<span>${escapeHTML(u.displayName||u.id)}${u.nickname?`<small>${escapeHTML(u.nickname)}</small>`:''}</span></button>`).join('')}<button class="account-menu-item switch" data-user="" role="menuitem">${tr('登录其他账户')}</button></div>`;
   const foot=`<div class="account-menu-group"><button class="account-menu-item danger" data-action="logout" role="menuitem">${tr('退出登录')}</button></div>`;
-  menu.innerHTML=`${head}${mine}${languageChooserHTML('account-menu-group')}${appearanceChooserHTML('account-menu-group')}${switchGroup}${foot}`;
-  bindLanguageChooser(menu);bindAppearanceChooser(menu);
+  menu.innerHTML=`${head}${mine}${switchGroup}${foot}`;
   menu.querySelectorAll('.account-menu-item[data-action]').forEach(b=>b.onclick=()=>accountMenuAction(b.dataset.action));
   menu.querySelectorAll('.account-menu-item.switch').forEach(b=>b.onclick=()=>signOutTo(b.dataset.user));
   positionAccountMenu();
 }
-/* 界面语言 lives in the account menu: it is each person's own preference,
-   and the login screen offers the same choice before anyone signs in. */
+/* 界面语言 and 我的外观 are each person's own, in 系统设置 › 个人偏好 for
+   everyone (#123); the login screen offers the language before anyone signs in. */
+function renderPersonalSettings(){
+  const lang=$('#languageSetting'),look=$('#myAppearanceSetting');
+  if(lang){lang.innerHTML=languageChooserHTML('settings-choice');bindLanguageChooser(lang)}
+  if(look){look.innerHTML=appearanceChooserHTML('settings-choice');bindAppearanceChooser(look)}
+}
 function languageChooserHTML(cls){
   return `<div class="${cls} language-chooser" role="group" aria-label="${tr('界面语言')}"><span class="account-menu-label">${tr('界面语言')}</span>`
     +`<div class="language-options">${Object.entries(LANGS).map(([id,label])=>`<button type="button" class="language-option${id===LANG?' is-active':''}" data-lang="${id}" lang="${id==='en'?'en':'zh-CN'}" aria-pressed="${id===LANG}">${label}</button>`).join('')}</div></div>`;
@@ -3548,7 +3564,7 @@ function appearanceChooserHTML(cls){
 function bindAppearanceChooser(root){
   const pick=(value,selector)=>{
     setAppearanceOverride(value);
-    if(root.id==='accountMenu'){renderAccountMenu();root.querySelector(selector)?.focus()}
+    if(root.id==='myAppearanceSetting'){renderPersonalSettings();root.querySelector(selector)?.focus();flashSaved(root)}
   };
   root.querySelectorAll('[data-appearance]').forEach(b=>b.onclick=()=>{
     const theme=b.dataset.appearance,own=appearanceOverride(),team=teamAppearance();
@@ -3577,9 +3593,27 @@ function accountMenuAction(action){
   toggleAccountMenu(false);
   if(action==='profile')editProfile(S.user.id,'self');
   else if(action==='password')changeOwnPassword();
+  else if(action==='desktop')connectDesktopApp();
   else if(action==='accounts')switchView('accounts');
   else if(action==='settings')switchView('settings');
   else if(action==='logout')signOutTo('');
+}
+/* 连接桌面 App: the macOS app connects to whatever server it is given, and
+   this page knows its own address, so it hands that over as a hola:// link.
+   The app only fills the address in; the person confirms and signs in there. */
+const DESKTOP_RELEASES='https://github.com/Ray-hola/Hola-Calendar/releases';
+const desktopConnectLink=origin=>`hola://connect?server=${encodeURIComponent(origin)}`;
+function connectDesktopApp(){
+  const origin=location.origin;
+  openModal(`<div class="eyebrow">${tr('桌面 App')}</div><h2>${tr('连接桌面 App')}</h2>`
+    +`<p class="muted">${tr('在 Mac 上装好哗啦待办桌面 App 后，点「在桌面 App 中打开」，它会填好这台服务器的地址，确认后登录即可。')}</p>`
+    +`<label class="form-field">${tr('服务器地址')}<input id="desktopServer" readonly value="${escapeHTML(origin)}"></label>`
+    +`<div class="modal-footer"><a class="secondary-btn" href="${DESKTOP_RELEASES}" target="_blank" rel="noopener">${tr('下载 macOS App')}</a>`
+    +`<button class="secondary-btn" id="copyDesktopServer">${tr('复制地址')}</button>`
+    +`<a class="primary-btn" id="openDesktopApp" href="${escapeHTML(desktopConnectLink(origin))}">${tr('在桌面 App 中打开')}</a></div>`);
+  $('#desktopServer').onfocus=e=>e.target.select();
+  // navigator.clipboard is missing on plain-http LAN addresses, so that case falls back too.
+  $('#copyDesktopServer').onclick=()=>(navigator.clipboard?.writeText?navigator.clipboard.writeText(origin):Promise.reject()).then(()=>toast(tr('地址已复制')),()=>{$('#desktopServer').select();toast(tr('请手动复制地址'))});
 }
 /* Passwords are typed into masked boxes, the new one twice: a slip nobody
    could see would otherwise only show at the next sign-in. */
@@ -4814,7 +4848,8 @@ const GUIDE=[
     [tr('三种权限组'),[[tr('权限组'), tr('适合')], ["superadmin", tr('系统所有者，通常只有一位')], [tr('管理员'), tr('负责审批和项目管理，可查看账户列表')], [tr('普通用户'), tr('团队成员，按规则组新建项目和任务')]],"table"],
     [tr('注意'),[tr('删除账户仅限 superadmin，且不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。')],'note'],
   ]},
-  {id:'settings',title:tr('系统设置'),icon:'settings',demo:'rules',lead:tr('对全体成员生效的规则，仅管理员可见。'),parts:[
+  {id:'settings',title:tr('系统设置'),icon:'settings',demo:'rules',lead:tr('个人偏好每个人都有；其余是对全体成员生效的规则，仅管理员可见。'),parts:[
+    [tr('个人偏好'),[tr('界面语言：简体中文或 English，跟着账户走。'),tr('我的外观：跟随团队，或选自己的主题和配色，只在这个浏览器里生效。')],'list'],
     [tr('查找设置'),[tr('左侧按类别跳转，顶部搜索框可以直接搜设置项。'),tr('改过默认值的设置左侧有一条竖线，点「恢复默认」改回。')],'list'],
     [tr('成员与权限'),[tr('规则组分别设定项目和任务的创建方式（直接创建、需要审批或不允许），以及 AI 助手的使用范围（关闭、查询与规划或可代为操作）。'),tr('点「新建规则组」创建新组并选择成员；没分到任何组的成员按「默认规则」。'),tr('「账户与权限组」进入账户管理。')],'list'],
     [tr('日程'),[tr('每周从哪天开始：影响周视图、档案室的周范围和周报。'),tr('固定任务递延合并：开启后同一固定任务没做完的几期合成一张卡。')],'list'],
@@ -7163,7 +7198,8 @@ async function planFlush(board){
 function planApplyReceipts(board,receipts){
   for(const x of board.projects.concat(board.tasks))if(receipts?.[x.cardId]){
     const r=receipts[x.cardId];x.state='done';x.selected=false;x.error='';x.result=r?.requested||r?.status==='pending'?tr('已提交申请'):tr('已接受');
-    if(x.ref!=null&&planOperation(x)==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+    if(x.ref!=null&&planOperation(x)==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+      board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
   }
 }
 async function agentRestoreBoard(raw,loading=false){
@@ -7190,14 +7226,45 @@ function planCheckpoint(board){
 }
 /* A checkpoint is taken when a field gets focus, before anything changes, so
    the newest one is often what the board already shows; undo skips those. */
-function planUndoState(board){return JSON.stringify({projects:board.projects,tasks:board.tasks,next:board.next})}
+/* Only what the cards say is kept: ticking a card or clearing its error is not a step to undo. */
+const planCardId=x=>String(x.cardId??x.ref??x.key);
+const planCardContent=({selected,error,result,...rest})=>rest;
+function planUndoState(board){
+  return JSON.stringify({projects:board.projects.map(planCardContent),tasks:board.tasks.map(planCardContent),next:board.next});
+}
 function planCanUndo(board){const now=planUndoState(board);return Boolean(board.history?.some(h=>h!==now))}
+function planSyncUndo(board){
+  const undo=board.el?.querySelector?.('.plan-undo');
+  if(undo)undo.disabled=Boolean(board.busy)||!planCanUndo(board);
+}
+/* A card accepted or sent (state done), or just reloaded, stays as it is now in
+   every earlier step, so undo still steps back the other cards' edits without
+   bringing it back. A rejected card can still be undone back to a draft. */
+function planSettleHistory(board,also=[]){
+  if(!board.history?.length)return;
+  const settled=board.projects.concat(board.tasks).filter(x=>x.state==='done'||also.includes(x));
+  const now=new Map(settled.map(x=>[planCardId(x),planCardContent(x)]));
+  board.history=board.history.map(h=>{
+    const step=JSON.parse(h);
+    for(const k of ['projects','tasks']){
+      const ids=new Set(step[k].map(planCardId));
+      step[k]=step[k].map(x=>now.get(planCardId(x))??x)
+        .concat(board[k].filter(x=>x.state==='done'&&!ids.has(planCardId(x))).map(planCardContent));
+    }
+    step.tasks=step.tasks.map(t=>board.refIds?.[t.project]?{...t,project:board.refIds[t.project]}:t);
+    step.next=Math.max(Number(step.next)||0,Number(board.next)||0);
+    return JSON.stringify(step);
+  });
+}
 function planUndo(board){
   if(board.busy||!board.history?.length)return;
   const now=planUndoState(board);
   while(board.history.length&&board.history.at(-1)===now)board.history.pop();
   if(!board.history.length){planRender(board);return}
-  Object.assign(board,JSON.parse(board.history.pop()));planRender(board);
+  const ui=new Map(board.projects.concat(board.tasks).map(x=>[planCardId(x),{selected:x.selected,error:x.error,result:x.result}]));
+  const step=JSON.parse(board.history.pop());
+  for(const k of ['projects','tasks'])step[k]=step[k].map(x=>({...x,...(ui.get(planCardId(x))??{})}));
+  Object.assign(board,step);planRender(board);
 }
 function planMarkFields(board){
   board.el.querySelectorAll('.plan-card').forEach(card=>{
@@ -7262,9 +7329,9 @@ async function planReload(board,x){
   const kind=x.ref!=null?'project':'task',op=planOperation(x),changes=op==='update'?planChanges(x,kind):{};
   board.busy=true;agentState.busy=true;planRender(board);agentUpdateBusy();
   try{
-    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op}]}});
+    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op,cardId:x.cardId}]}});
     const fresh=planDraft(raw)[kind+'s'][0];
-    Object.assign(x,fresh,kind==='project'?{ref:x.ref}:{key:x.key},{error:''});board.history=[];
+    Object.assign(x,fresh,{cardId:x.cardId},kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
   }catch(e){x.error=e?.message||tr('读取失败')}
   finally{board.busy=false;agentState.busy=false;planRender(board);agentUpdateBusy()}
 }
@@ -7346,8 +7413,11 @@ function planRender(board,entering=false){
 function planBind(board){
   const el=board.el;if(el.dataset.bound)return;el.dataset.bound='1';
   const item=node=>{const card=node.closest('.plan-card');if(!card)return null;return card.dataset.ref!=null?board.projects.find(p=>p.ref===card.dataset.ref):board.tasks.find(t=>t.key===card.dataset.key)};
-  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy)planCheckpoint(board)});
-  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;if(x&&['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);planScheduleSave(board)}});
+  el.addEventListener('focusin',e=>{if(item(e.target)&&!board.busy&&!e.target.hasAttribute?.('data-plan-select'))planCheckpoint(board)});
+  el.addEventListener('input',e=>{const f=e.target.dataset?.f,x=item(e.target);if(board.busy||!x||!f)return;
+    if(['name','desc','reason','confirm'].includes(f)){x[f]=e.target.value;planMarkFields(board);planSyncUndo(board);planScheduleSave(board);return}
+    // Numbers, dates and times only send change when they lose focus; 撤销修改 is ready as soon as they differ.
+    if(['duration','date','deadline','time','start','end'].includes(f)){x[f]=f==='duration'?Number(e.target.value):e.target.value;planSyncUndo(board)}});
   el.addEventListener('change',e=>{
     const f=e.target.dataset?.f,x=item(e.target);if(board.busy)return;
     planScheduleSave(board);
@@ -7362,7 +7432,7 @@ function planBind(board){
     // A blur-triggered change must not replace the button under pointerdown.
     // Rebuild only when the available people/project controls actually change.
     if(['owner','project'].includes(f))planRender(board);
-    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);const undo=el.querySelector('.plan-undo');if(undo)undo.disabled=!planCanUndo(board);}
+    else{const end=e.target.closest('.plan-card')?.querySelector('[data-f="end"]');if(f==='start'&&end){end.value=x.end||'';end.min=x.start;}planMarkFields(board);planSyncUndo(board);}
   });
   el.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||board.busy)return;
@@ -7415,10 +7485,12 @@ async function planSubmit(board,items=null){
       if(op==='create')changes=kind==='project'?{name:x.name.trim(),desc:x.desc,start:x.start,end:x.end,cycle:x.end?'range':'infinite',priority:x.priority||'P1',members:x.members,...(S.user.admin?{owner:x.owner}:{})}:{name:x.name.trim(),desc:x.desc,projectId:x.project.startsWith('id:')?x.project.slice(3):null,assignee:x.assignee,date:x.date,deadline:x.deadline||null,time:x.time,duration:Number(x.duration)||60,priority:x.priority};
       const r=await api('/api/action',{action:'work.card.apply',data:{kind,operation:op,id:x.id,revision:x.revision,cardId:x.cardId,changes,confirmed:true,confirm:op==='delete'?(kind==='project'?x.confirm:x.before.name):undefined,request:path.mode==='approval',reason:x.reason,sessionId:agentState.sessionId}});
       const pending=r?.requested||r?.status==='pending'||path.mode==='approval';
-      results[pending?'approval':op]++;board.history=[];
-      if(kind==='project'&&op==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+      results[pending?'approval':op]++;
+      if(kind==='project'&&op==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+        board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
-    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;}}catch(_){}}}
+      planSettleHistory(board);
+    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{
