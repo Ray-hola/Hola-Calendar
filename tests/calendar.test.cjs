@@ -1597,8 +1597,7 @@ test('files dragged in from another app upload anywhere in the project space, fo
   assert.ok(!space.classList.on.has('is-over'));
   assert.deepEqual(a.json('uploads'),[['live',['方案.pdf'],1]],'the skipped folder is counted in the upload message');
   space.ondrop(event(['Files'],{files:[{name:'资料',size:0,type:''}],items:[]}));
-  assert.equal(a.json('uploads').length,1,'without entries a folder is still told apart');
-  assert.equal(a.json('toasts').length,1,'a folder-only drop says why nothing uploaded');
+  assert.deepEqual(a.json('uploads[1]'),['live',['资料'],0],'without entries it is left to the upload, which skips empty files');
   a.run(`UI.space='old';renderProjects();`);
   assert.equal(space.ondrop,null,'an archive takes no drop');
   const field={closest:s=>(s.includes('textarea')?{}:null)},page={closest:()=>null};
@@ -1607,14 +1606,41 @@ test('files dragged in from another app upload anywhere in the project space, fo
   assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files','text/uri-list']},target:field}),false,'a link dropped in a text field is typed in');
 });
 
-test('an upload puts unsaved 项目背景 back, only into the same project (#117)',async()=>{
-  const a=app(),els={'#spaceBackgroundEditor':{dataset:{mode:'preview'}},'#saveBackground':{disabled:false},'#spaceBackground':{tagName:'TEXTAREA',value:'没保存的背景'}};
-  a.context.document={querySelector:s=>els[s]||null,querySelectorAll:()=>[]};
-  a.run(`var put=[];mdSet=(r,v)=>put.push(v);mdShow=(r,m)=>put.push(m);UI.space='A';`);
-  a.run(`refresh=async()=>{}`);await a.run(`refreshKeepingBackground({id:'A'})`);
+test('redrawing the same project space keeps unsaved 项目背景, its mode and caret (#117)',()=>{
+  const a=app(),bg={tagName:'TEXTAREA',value:'没保存的背景',selectionStart:2,selectionEnd:4,focus(){this.focused=true},setSelectionRange(s,e){this.range=[s,e]}};
+  const els={'#spaceBackgroundEditor':{dataset:{mode:'preview',saved:'已保存的'}},'#spaceBackground':bg};
+  a.context.document={querySelector:s=>els[s]||null,querySelectorAll:()=>[],activeElement:bg};
+  a.run(`var put=[];mdSet=(r,v)=>put.push(v);mdShow=(r,m)=>put.push(m);`);
+  a.run(`holdSpaceBackground({dataset:{meetingProject:'A'}},'A')()`);
   assert.deepEqual(a.json('put'),['没保存的背景','preview'],'the draft and its mode come back');
-  a.run(`put=[];refresh=async()=>{UI.space='B'}`);await a.run(`refreshKeepingBackground({id:'A'})`);
-  assert.deepEqual(a.json('put'),[],'another project opened meanwhile gets nothing');
+  assert.ok(bg.focused);assert.deepEqual(bg.range,[2,4],'and the caret where it was');
+  a.run(`put=[];holdSpaceBackground({dataset:{meetingProject:'A'}},'B')()`);
+  assert.deepEqual(a.json('put'),[],'another project gets nothing');
+  els['#spaceBackgroundEditor'].dataset.saved='没保存的背景';
+  a.run(`holdSpaceBackground({dataset:{meetingProject:'A'}},'A')()`);
+  assert.deepEqual(a.json('put'),[],'saved text is simply redrawn');
+  assert.match(source,/const restoreBackground=holdSpaceBackground\(box,id\);\s*box\.innerHTML=/,'held before the space is redrawn');
+});
+
+test('nothing takes the focus from a field being typed in: the tour waits, the voice wrapper hands it back',()=>{
+  const a=app(),field={closest:s=>(s.includes('textarea')?{}:null)};
+  a.context.document={querySelector:()=>null,querySelectorAll:()=>[],activeElement:field};
+  a.run(`meetingLive.session=null;meetingLive.active=false;UI.docDirty=false`);
+  assert.equal(a.run('tourBusy()'),true,'typing holds the tour back');
+  a.context.document.activeElement={closest:()=>null};
+  assert.equal(a.run('tourBusy()'),false);
+  assert.match(source,/const typing=document\.activeElement===input,from=input\.selectionStart,to=input\.selectionEnd;\s*input\.before\(wrapper\);wrapper\.append\(input\);\s*if\(typing\)\{input\.focus/);
+});
+
+test('empty files are skipped before upload, from a drop or the picker (#117)',async()=>{
+  const a=app(),sent=[];
+  a.context.fetch=async(path,options)=>{sent.push(options.headers['X-File-Name']);return {ok:true,text:async()=>'{}'}};
+  a.run(`var toasts=[];toast=m=>toasts.push(m);refresh=async()=>{};`);
+  await a.run(`uploadProjectFiles({id:'p'},[{name:'a.txt',size:3,type:'text/plain'},{name:'空',size:0,type:''}])`);
+  assert.deepEqual(sent,['a.txt']);
+  assert.match(a.json('toasts').at(-1),/已上传 1 个文件，跳过了 1 个文件夹或空文件/);
+  await a.run(`uploadProjectFiles({id:'p'},[{name:'空',size:0,type:''}])`);
+  assert.equal(sent.length,1);assert.match(a.json('toasts').at(-1),/文件夹和空文件不能上传/);
 });
 
 test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
@@ -1717,6 +1743,16 @@ test('a 成果库 project shows each task with ✅, its links and what the perso
   assert.match(html,/href="https:\/\/a\.com\/x"/,'the period before a closing bracket is not part of the link');
   assert.match(html,/王零说：（见.）调用 foo\(\) 即可，比例 3 : 1<\/p>/,'text away from the link is left as written');
   assert.match(one('https://ok.com@evil.com/x?a=1&b=2'),/href="https:\/\/ok\.com@evil\.com\/x\?a=1&amp;b=2"[^>]*>🔗 evil\.com</,'the label names the host the link really opens');
+});
+
+test('the 成果库 sentences have English, and render in English (#124)',()=>{
+  const en=appIn('en');
+  for(const said of JSON.parse(en.run('JSON.stringify(Object.values(ACHIEVEMENT_SAID).concat(["{0}说"]))')))
+    assert.notEqual(en.run(`tr(${JSON.stringify(said)},'Wang')`),said.replace('{0}','Wang'),`${said} has English`);
+  en.run(`S.users=[{id:'wang00',displayName:'Wang'}]`);
+  const html=en.run(`achievementTaskHTML({name:'Spec',assignee:'wang00',status:'done',completionSummary:'Draft at https://a.com/x',completionFeeling:'顺利'})`);
+  assert.match(html,/Wang · Done ✅/);
+  assert.match(html,/<p>Wang found it went smoothly: Draft at<\/p>/);
 });
 
 test('project invites show the owner display name',()=>{
@@ -4707,6 +4743,36 @@ test('a card found applied after a lost response stays accepted through undo (#1
   assert.equal(a.run('board.projects[0].state'), 'done', '撤销后仍是已接受');
   assert.equal(a.run('board.tasks[0].name'), 'A');
   assert.equal(a.run('board.tasks[0].project'), 'id:p7', '旧步骤里的任务也跟着新建的项目');
+});
+
+test('a card the server already ran is said so, and a reload frees it under a new id (#116)', async () => {
+  const a = planningApp(), sent = [];
+  a.context.fetch = async (path, options) => {
+    const body = JSON.parse(options.body);
+    sent.push(body);
+    if (body.action === 'work.card.apply') return {ok: false, status: 409, text: async () => '{"error":"这张卡片已执行，不能用同一卡片提交不同内容"}'};
+    if (body.action === 'agent.draft.get') return {ok: true, text: async () => JSON.stringify({receipts: {'card-1': {id: 't9'}}})};
+    const card = body.data.tasks[0];
+    return {ok: true, text: async () => JSON.stringify({tasks: [{...card, cardId: card.cardId || 'card-new', revision: 'r2', operation: 'update', name: 'B',
+      before: {name: 'A2', assignee: 'test001', date: '2026-11-03'}, assignee: 'test001', date: '2026-11-03'}]})};
+  };
+  const make = conv => `refresh=async()=>{};agentAppend=()=>{};
+    var board={...planDraft({tasks:[{id:'t9',operation:'update',cardId:'card-1',revision:'r1',name:'A',assignee:'test001',date:'2026-11-03',
+      before:{name:'A',assignee:'test001',date:'2026-11-03'}}]}),${conv}el:{querySelector:()=>null},history:[]};
+    ${conv ? "agentState.planBoard=board;agentState.conversationId='c1';" : ''}planCheckpoint(board);board.tasks[0].name='B';`;
+  a.run(make("conversationId:'c1',draftId:'d1',"));
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(a.run('board.tasks[0].state'), 'done');
+  assert.equal(a.run('board.tasks[0].result'), '此前已执行；这次的修改没有提交', 'not reported as accepted');
+  a.run(make(''));sent.length = 0;
+  await a.run('planSubmit(board,[board.tasks[0]])');
+  assert.equal(a.run('board.tasks[0].usedCard'), true);
+  await a.run('planReload(board,board.tasks[0])');
+  assert.equal(sent.at(-1).data.tasks[0].cardId, undefined, 'the reload asks for a fresh card');
+  assert.equal(a.run('board.tasks[0].cardId'), 'card-new');
+  assert.ok(a.json('board.history').every(h => !h.includes('card-1')), 'earlier steps follow the new id');
+  a.run('planUndo(board)');
+  assert.equal(a.json('board.tasks.length'), 1, 'undo does not bring a second copy back');
 });
 
 test('ticking a card is not an undo step, and the undo button wakes up while a number is typed (#116)', () => {
