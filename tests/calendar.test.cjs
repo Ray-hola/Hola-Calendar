@@ -4637,3 +4637,11 @@ test('the sidebar sits above the project space so the account menu is not covere
   assert.ok(z('\\.sidebar') > z('\\.space-tabs'), 'above the sticky project tabs');
   assert.ok(z('\\.sidebar') > z('\\.topbar'), 'and the top bar');
 });
+
+test('连接桌面 App hands this server’s own address to the desktop app as an encoded hola:// link', () => {
+  const a = app();
+  assert.equal(a.run("desktopConnectLink('https://work.example.com')"), 'hola://connect?server=https%3A%2F%2Fwork.example.com');
+  assert.equal(a.run("desktopConnectLink('http://192.168.1.8:4173')"), 'hola://connect?server=http%3A%2F%2F192.168.1.8%3A4173');
+  assert.match(source, /row\('desktop',tr\('连接桌面 App'\)/, 'every account sees it, not only admins');
+  assert.match(source, /action==='desktop'\)connectDesktopApp\(\)/);
+});
