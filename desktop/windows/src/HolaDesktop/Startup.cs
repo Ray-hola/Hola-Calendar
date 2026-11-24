@@ -16,7 +16,7 @@ namespace Hola.Desktop
         const string Name = "HolaDesktop";
         const string ProtocolKey = @"Software\Classes\" + Hola.Core.ConnectLink.Scheme;
 
-        public static string ExePath => Process.GetCurrentProcess().MainModule.FileName;
+        public static string ExePath { get { using (var p = Process.GetCurrentProcess()) return p.MainModule.FileName; } }
         static string Command => "\"" + ExePath + "\"";
 
         /// <summary>

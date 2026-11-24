@@ -91,7 +91,8 @@ namespace Hola.Desktop
                             File.Move(CrashLog, old);
                         }
                     }
-                    catch (IOException) { }   // held open elsewhere: keep appending to it
+                    // Held open or read-only: keep appending to the current file.
+                    catch (Exception x) when (x is IOException || x is UnauthorizedAccessException) { }
                     File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
                     lastLogged = text;
                 }
@@ -135,6 +136,7 @@ namespace Hola.Desktop
                     {
                         var owner = Owner((int)pid);
                         if (owner == false) return;   // someone else holds the name: they get nothing
+                        // null (could not tell): the address still goes, it only fills a box; the focus is not handed over.
                         if (owner == true) AllowSetForegroundWindow(pid);
                     }
                     var bytes = Encoding.UTF8.GetBytes(server);
@@ -153,7 +155,7 @@ namespace Hola.Desktop
 
         /// <summary>
         /// Whether the pipe's owner is this app (any copy of it) in this session: true, false, or
-        /// null when it cannot be told. Limited query rights also work on a copy run as administrator.
+        /// null when it cannot be told (for example a copy run as administrator).
         /// </summary>
         static bool? Owner(int pid)
         {
@@ -161,15 +163,18 @@ namespace Hola.Desktop
             if (handle == IntPtr.Zero) return null;
             try
             {
-                var name = new StringBuilder(1024); var size = name.Capacity;
+                var name = new StringBuilder(32768); var size = name.Capacity;
                 if (!QueryFullProcessImageName(handle, 0, name, ref size)) return null;
-                if (!ProcessIdToSessionId(pid, out var theirs) || !ProcessIdToSessionId(Process.GetCurrentProcess().Id, out var mine)) return null;
+                int self;
+                using (var current = Process.GetCurrentProcess()) self = current.Id;
+                if (!ProcessIdToSessionId(pid, out var theirs) || !ProcessIdToSessionId(self, out var mine)) return null;
                 if (theirs != mine) return false;
                 // The build stamps the exe's own name inside it, which stays the same when the file is renamed or copied.
                 string them = FileVersionInfo.GetVersionInfo(name.ToString()).InternalName, me = FileVersionInfo.GetVersionInfo(Startup.ExePath).InternalName;
                 return string.Equals(them, me, StringComparison.OrdinalIgnoreCase);
             }
-            catch (Exception e) when (e is IOException || e is System.ComponentModel.Win32Exception || e is UnauthorizedAccessException) { return null; }
+            // Whatever goes wrong here only means the owner could not be told.
+            catch (Exception) { return null; }
             finally { CloseHandle(handle); }
         }
 
