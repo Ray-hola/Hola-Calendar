@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- holactl: the command-line client used by the integration test and for
+       checking a server from a terminal. Same core as the app. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>holactl</AssemblyName>
+    <RootNamespace>Hola.Ctl</RootNamespace>
+  </PropertyGroup>
+</Project>

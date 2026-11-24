@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests for the shared core: a plain console program with its own tiny
+       harness, like the macOS tests, so nothing has to be downloaded. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>HolaCoreTests</AssemblyName>
+    <RootNamespace>Hola.Tests</RootNamespace>
+  </PropertyGroup>
+</Project>
