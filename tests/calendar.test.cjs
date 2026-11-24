@@ -3721,7 +3721,28 @@ test('the account menu offers both languages and marks the current one', () => {
   assert.match(html, /data-lang="zh"[^>]*>简体中文</);
   assert.match(html, /class="language-option is-active" data-lang="en"[^>]*aria-pressed="true">English</);
   assert.match(html, /aria-label="Language"/);
-  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{languageChooserHTML\('account-menu-group'\)\}/);
+  assert.match(source, /menu\.innerHTML=`\$\{head\}\$\{mine\}\$\{switchGroup\}\$\{foot\}`/, 'the account menu has no switches (#123)');
+});
+
+test('系统设置 is for everyone: members get 个人偏好 with language and look, and no admin rows (#123)', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.match(html, /<button class="nav-item" data-view="settings">/, 'the nav item is not admin-only');
+  assert.match(html, /id="settings-personal"[^>]*>[\s\S]*?data-setting="language" data-role="self"[\s\S]*?data-setting="myAppearance" data-role="self"/);
+  const a = app(), rows = [], els = {};
+  const node = (extra = {}) => ({innerHTML: '', dataset: {}, classList: {on: new Set(), toggle(c, v) {
+    v ? this.on.add(c) : this.on.delete(c);
+  }, contains(c) {
+    return this.on.has(c);
+  }}, querySelector: () => null, querySelectorAll: () => [], ...extra});
+  for (const [setting, role] of [['language', 'self'], ['myAppearance', 'self'], ['rules', 'superadmin'], ['week', 'admin'], ['theme', 'admin']]) rows.push(node({dataset: {setting, role}}));
+  a.context.document = {querySelector: s => els[s] || (els[s] = node()), querySelectorAll: s => (s === '#settingsView .setting-row' ? rows : [])};
+  a.run("S.user={id:'m1',admin:0,role:'member'};S.users=[];renderSettings();renderAccountMenu()");
+  assert.deepEqual(rows.filter(r => !r.classList.on.has('is-forbidden')).map(r => r.dataset.setting), ['language', 'myAppearance']);
+  assert.match(els['#languageSetting'].innerHTML, /data-lang="en"/);
+  assert.match(els['#myAppearanceSetting'].innerHTML, /data-appearance=""[^>]*>跟随团队/);
+  assert.match(els['#accountMenu'].innerHTML, /data-action="settings"/, 'members open 系统设置 from the account menu too');
+  assert.doesNotMatch(els['#accountMenu'].innerHTML, /language-option|data-appearance/);
+  assert.match(source, /if\(view==='accounts'&&!S\.user\?\.admin\)\{view='calendar'\}/, 'only 账户管理 stays admin-only');
 });
 
 test('the account’s saved language wins over the browser unless ?lang= is set', () => {

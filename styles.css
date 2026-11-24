@@ -15659,6 +15659,27 @@ body.is-resizing-agent { user-select: none; }
   margin: 0;
 }
 
+/* 个人偏好 in 系统设置 (#123): the row title names the choice, so the chooser's own label goes. */
+.settings-choice > .account-menu-label {
+  display: none;
+}
+
+.settings-choice .language-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+}
+
+.settings-choice .language-option {
+  min-width: 96px;
+  padding: 7px 14px;
+}
+
+.settings-choice .palette-row {
+  padding: 10px 0 0;
+}
+
 .appearance-chooser .account-menu-label small {
   display: block;
   margin-top: 2px;
