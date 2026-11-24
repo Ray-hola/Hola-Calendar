@@ -7132,7 +7132,8 @@ async function planFlush(board){
 function planApplyReceipts(board,receipts){
   for(const x of board.projects.concat(board.tasks))if(receipts?.[x.cardId]){
     const r=receipts[x.cardId];x.state='done';x.selected=false;x.error='';x.result=r?.requested||r?.status==='pending'?tr('已提交申请'):tr('已接受');
-    if(x.ref!=null&&planOperation(x)==='create')board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id});
+    if(x.ref!=null&&planOperation(x)==='create'&&r?.id!=null){board.refIds={...board.refIds,[`ref:${x.ref}`]:`id:${r.id}`};
+      board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
   }
 }
 async function agentRestoreBoard(raw,loading=false){
@@ -7185,6 +7186,7 @@ function planSettleHistory(board,also=[]){
         .concat(board[k].filter(x=>x.state==='done'&&!ids.has(planCardId(x))).map(planCardContent));
     }
     step.tasks=step.tasks.map(t=>board.refIds?.[t.project]?{...t,project:board.refIds[t.project]}:t);
+    step.next=Math.max(Number(step.next)||0,Number(board.next)||0);
     return JSON.stringify(step);
   });
 }
@@ -7261,9 +7263,9 @@ async function planReload(board,x){
   const kind=x.ref!=null?'project':'task',op=planOperation(x),changes=op==='update'?planChanges(x,kind):{};
   board.busy=true;agentState.busy=true;planRender(board);agentUpdateBusy();
   try{
-    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op}]}});
+    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op,cardId:x.cardId}]}});
     const fresh=planDraft(raw)[kind+'s'][0];
-    Object.assign(x,fresh,kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
+    Object.assign(x,fresh,{cardId:x.cardId},kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
   }catch(e){x.error=e?.message||tr('读取失败')}
   finally{board.busy=false;agentState.busy=false;planRender(board);agentUpdateBusy()}
 }
@@ -7422,7 +7424,7 @@ async function planSubmit(board,items=null){
         board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
       planSettleHistory(board);
-    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;}}catch(_){}}}
+    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);if(x.state==='done'){results.failed--;results[op]++;planSettleHistory(board)}}catch(_){}}}
     planRender(board);
   };
   try{
