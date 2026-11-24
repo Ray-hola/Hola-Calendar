@@ -14,6 +14,8 @@ foreach ($v in 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_pr
 $Port = if ($env:PORT) { $env:PORT } else { '48173' }
 $Work = Join-Path ([IO.Path]::GetTempPath()) ('hola-it-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $Work | Out-Null
+# server.py prints Chinese; with its output going to a file Python would otherwise pick the ANSI code page.
+$env:PYTHONUTF8 = '1'
 $python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
 $server = Start-Process $python -ArgumentList "`"$Repo\server.py`" --port $Port --db `"$Work\db.sqlite3`"" -PassThru -WindowStyle Hidden `
   -RedirectStandardOutput "$Work\server.log" -RedirectStandardError "$Work\server.err"
@@ -21,7 +23,7 @@ $server = Start-Process $python -ArgumentList "`"$Repo\server.py`" --port $Port 
 $fails = 0
 try {
   $up = $false
-  for ($i = 0; $i -lt 50 -and -not $up; $i++) {
+  for ($i = 0; $i -lt 50 -and -not $up -and -not $server.HasExited; $i++) {
     try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/api/health" -TimeoutSec 3 | Out-Null; $up = $true } catch { Start-Sleep -Milliseconds 200 }
   }
   if (-not $up) { Get-Content "$Work\server.err"; Write-Host 'server did not start'; exit 1 }
@@ -86,7 +88,8 @@ try {
 }
 finally {
   # The py launcher starts python.exe as a child, so the whole tree goes.
-  & taskkill /T /F /PID $server.Id 2>&1 | Out-Null
+  $ErrorActionPreference = 'Continue'
+  if (-not $server.HasExited) { & taskkill /T /F /PID $server.Id 2>&1 | Out-Null }
   Start-Sleep -Milliseconds 300
   Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 }
