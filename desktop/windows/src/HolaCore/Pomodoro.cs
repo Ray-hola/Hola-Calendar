@@ -108,7 +108,7 @@ namespace Hola.Core
             {
                 // A hand-edited or damaged value must not stop the app from starting.
                 if (!double.TryParse(d.Str("endsAt"), NumberStyles.Float, CultureInfo.InvariantCulture, out var ms)
-                    || double.IsNaN(ms) || ms < 0 || ms > (DateTime.MaxValue - Unix).TotalMilliseconds) return Fresh(PomoMode.Focus);
+                    || double.IsNaN(ms) || ms < 0 || ms > (DateTime.UtcNow.AddDays(1) - Unix).TotalMilliseconds) return Fresh(PomoMode.Focus);
                 end = Unix.AddMilliseconds(ms);
             }
             return new Pomodoro(mode == "focus" ? PomoMode.Focus : PomoMode.Rest, d.Int("left"), end);

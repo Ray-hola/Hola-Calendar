@@ -112,6 +112,7 @@ namespace Hola.Core
             public int Status;
             public string Body;
             public List<string> SetCookies;
+            public string Location;
         }
 
         internal async Task<Reply> Send(string method, string path, string token, Dictionary<string, object> body)
@@ -128,7 +129,7 @@ namespace Hola.Core
                 {
                     var text = resp.Content == null ? "" : await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                     var cookies = resp.Headers.TryGetValues("Set-Cookie", out var v) ? v.ToList() : new List<string>();
-                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies };
+                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies, Location = resp.Headers.Location?.ToString() };
                 }
             }
             catch (HttpRequestException e) { throw new ApiException(ApiErrorKind.Offline, (e.InnerException ?? e).Message); }
@@ -143,6 +144,9 @@ namespace Hola.Core
             if (r.Status == 200) return;
             var msg = Json.Object(r.Body).Str("error") ?? "";
             if (r.Status == 401) throw new ApiException(ApiErrorKind.Unauthorized, msg);
+            // Redirects are not followed (they would carry the session along); the address to use instead is named.
+            if (r.Status >= 300 && r.Status < 400 && msg.Length == 0)
+                msg = string.IsNullOrEmpty(r.Location) ? $"服务器返回 {r.Status}" : $"服务器把请求转到了 {r.Location}，请改填这个地址";
             throw new ApiException(ApiErrorKind.Server, msg.Length == 0 ? $"服务器返回 {r.Status}" : msg, r.Status);
         }
 

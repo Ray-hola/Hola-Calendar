@@ -16,6 +16,8 @@ namespace Hola.Core
         public string Path { get; }
         string Backup => Path + ".bak";
         readonly Dictionary<string, object> values;
+        /// <summary>The main file did not parse; it must not be swapped into .bak over the good copy.</summary>
+        bool mainBroken;
 
         public static string DefaultPath =>
             System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HolaDesktop", "settings.json");
@@ -24,7 +26,9 @@ namespace Hola.Core
         {
             Path = path ?? DefaultPath;
             // A file left unreadable by a power cut falls back to the copy from the write before.
-            values = Json.Object(Read(Path)) ?? Json.Object(Read(Backup)) ?? new Dictionary<string, object>();
+            var main = Json.Object(Read(Path));
+            mainBroken = main == null && File.Exists(Path);
+            values = main ?? Json.Object(Read(Backup)) ?? new Dictionary<string, object>();
         }
 
         static string Read(string file)
@@ -57,7 +61,9 @@ namespace Hola.Core
                         f.Write(bytes, 0, bytes.Length);
                         f.Flush(flushToDisk: true);
                     }
+                    if (mainBroken && File.Exists(Path)) File.Delete(Path);
                     if (File.Exists(Path)) File.Replace(temp, Path, Backup, ignoreMetadataErrors: true); else File.Move(temp, Path);
+                    mainBroken = false;
                     return;
                 }
                 // An antivirus scan or the indexer can hold the file for a moment.

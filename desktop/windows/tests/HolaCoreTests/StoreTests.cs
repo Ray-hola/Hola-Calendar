@@ -58,6 +58,15 @@ namespace Hola.Tests
                     Eq(new Settings(file).Get("server"), "https://a.example.com");
                     s.Set("look", null);
                     Eq(new Settings(file).Get("username"), "ray");
+                    // Loaded from .bak, the good copy stays there until a sound main file is back.
+                    new Settings(file).Set("username", "ray");
+                    new Settings(file).Set("username", "ray");
+                    System.IO.File.WriteAllBytes(file, new byte[64]);
+                    var again = new Settings(file);
+                    Eq(again.Get("username"), "ray");
+                    again.Set("style", "tempo");
+                    Eq(new Settings(file).Get("style"), "tempo");
+                    Check(Json.Object(System.IO.File.ReadAllText(file + ".bak")) != null, "the broken file never becomes the backup");
                 }
                 finally { if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true); }
             });

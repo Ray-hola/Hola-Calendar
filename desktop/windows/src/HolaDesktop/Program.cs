@@ -69,12 +69,19 @@ namespace Hola.Desktop
 
         static string CrashLog => Path.Combine(Path.GetDirectoryName(Settings.DefaultPath), "crash.log");
 
+        static string lastLogged;
+
+        /// <summary>Appends to crash.log, skipping a repeat of the last entry and starting over past 1 MB.</summary>
         static void Log(Exception e)
         {
+            var text = e.ToString();
+            if (text == lastLogged) return;
+            lastLogged = text;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(CrashLog));
-                File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
+                if (File.Exists(CrashLog) && new FileInfo(CrashLog).Length > 1 << 20) File.Delete(CrashLog);
+                File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
             }
             catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
@@ -106,7 +113,8 @@ namespace Hola.Desktop
         {
             try
             {
-                using (var pipe = new NamedPipeClientStream(".", Id, PipeDirection.Out))
+                using (var pipe = new NamedPipeClientStream(".", Id, PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes, PipeOptions.None,
+                    System.Security.Principal.TokenImpersonationLevel.Identification, HandleInheritability.None))
                 {
                     pipe.Connect(3000);
                     // This start came from a click, so it may hand the foreground on: the panel then gets the focus.
@@ -119,14 +127,15 @@ namespace Hola.Desktop
             catch (Exception e) when (e is IOException || e is TimeoutException || e is UnauthorizedAccessException) { }
         }
 
-        /// <summary>The pipe's owner is this same exe in this session, not something squatting on the name.</summary>
+        /// <summary>The pipe's owner is this app (any copy of it) in this session, not something squatting on the name.</summary>
         static bool IsOurs(int pid)
         {
             try
             {
                 using (var p = Process.GetProcessById(pid))
                 using (var me = Process.GetCurrentProcess())
-                    return p.SessionId == me.SessionId && string.Equals(p.MainModule.FileName, me.MainModule.FileName, StringComparison.OrdinalIgnoreCase);
+                    return p.SessionId == me.SessionId
+                        && string.Equals(p.MainModule.FileVersionInfo.InternalName, me.MainModule.FileVersionInfo.InternalName, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception) { return false; }
         }

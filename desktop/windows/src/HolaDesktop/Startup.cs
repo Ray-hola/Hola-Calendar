@@ -23,8 +23,19 @@ namespace Hola.Desktop
         /// Run straight from the zip, Explorer starts a copy in %TEMP% that is
         /// cleaned away later; nothing may be registered to point there.
         /// </summary>
-        public static bool RunningFromTemp =>
-            ExePath.StartsWith(System.IO.Path.GetFullPath(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase);
+        public static bool RunningFromTemp => Long(ExePath).StartsWith(Long(System.IO.Path.GetTempPath()), StringComparison.OrdinalIgnoreCase);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern int GetLongPathName(string shortPath, System.Text.StringBuilder longPath, int size);
+
+        /// <summary>`C:\Users\RAYHOL~1\...` written out in full, so two spellings of one folder compare equal.</summary>
+        static string Long(string path)
+        {
+            var full = System.IO.Path.GetFullPath(path);
+            var sb = new System.Text.StringBuilder(1024);
+            var n = GetLongPathName(full, sb, sb.Capacity);
+            return n > 0 && n < sb.Capacity ? sb.ToString() : full;
+        }
 
         /// <summary>On when the Run entry starts this very exe and Task Manager has not switched it off.</summary>
         public static bool LaunchAtLoginEnabled

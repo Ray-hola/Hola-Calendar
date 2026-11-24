@@ -103,9 +103,9 @@ namespace Hola.Desktop
             if (key != builtKey)
             {
                 var focused = Keyboard.FocusedElement;
-                taskScroll = taskList?.VerticalOffset ?? 0;
+                if (taskList != null && taskList.IsLoaded) taskScroll = taskList.VerticalOffset;
                 builtKey = key;
-                Build();
+                try { Build(); } catch { builtKey = null; throw; }
                 if (focused == serverBox || focused == userBox || focused == passBox) Dispatcher.BeginInvoke(new Action(() => ((Control)focused).Focus()));
             }
             UpdateDynamic();
