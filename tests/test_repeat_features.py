@@ -405,6 +405,10 @@ class RepeatFeatureTests(unittest.TestCase):
                          {'completedBy': 'test001', 'completionSummary': '交付文档 https://docs.example.com/x',
                           'completionFeeling': '顺利'})
         self.assertEqual(self.store.snapshot(self.member)['achievements'], [])
+        # A task completed through the old approval flow keeps its summary there.
+        task.pop('completionSummary'); task['approval'] = {'summary': '审批时写的总结'}
+        self.store.put('tasks', task); self.store.db.commit()
+        self.assertEqual(self.store.snapshot(self.admin)['achievements'][0]['tasks'][0]['completionSummary'], '审批时写的总结')
 
 
 if __name__ == '__main__':

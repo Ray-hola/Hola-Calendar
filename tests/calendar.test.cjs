@@ -1660,6 +1660,15 @@ test('a 成果库 project shows each task with ✅, its links and what the perso
   assert.ok(!modal.includes('<img'),'a summary is text, not markup');
   assert.match(items[2],/&lt;b&gt;赵&lt;\/b&gt;说：&lt;img/);
   assert.ok(!items[3].includes('✅')&&!items[3].includes('not.shown'),'an unfinished task gets no ✅ and no links');
+  const one=summary=>{a.run(`S.achievements[0].tasks=[{id:'x',name:'X',assignee:'wang00',status:'done',completionSummary:${JSON.stringify(summary)}}];openWorkLogDetail('','old','project')`);return a.run('modal')};
+  let html=one('https://a.com/x见附件');
+  assert.match(html,/href="https:\/\/a\.com\/x"/);assert.match(html,/王零说：见附件/,'Chinese after a link stays in the sentence');
+  html=one('see https://a.com/wiki/A_(b). Done (https://b.com/y)');
+  assert.match(html,/href="https:\/\/a\.com\/wiki\/A_\(b\)"/);assert.match(html,/href="https:\/\/b\.com\/y"/);
+  assert.match(html,/王零说：see\. Done<\/p>/,'the cut period stays, an emptied bracket goes');
+  html=one('https://a.com/1,https://b.com/2');
+  assert.equal(html.match(/<a /g).length,2,'two links written with a comma between are two links');
+  assert.match(one('https://ok.com@evil.com/x?a=1&b=2'),/href="https:\/\/ok\.com@evil\.com\/x\?a=1&amp;b=2"[^>]*>🔗 evil\.com</,'the label names the host the link really opens');
 });
 
 test('project invites show the owner display name',()=>{

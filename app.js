@@ -5204,17 +5204,27 @@ const memberShelfCard=p=>`<article class="achievement-card" data-project="${esca
   +`<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr('沟通记录')}</button></div></article>`;
 /* One finished task in a 成果库 project: ✅, the links its completion summary
    gave, and what the person who did it said about it. */
-const ACHIEVEMENT_LINK=/https?:\/\/[^\s<>"'，。；、！？）」]+/g;
+const ACHIEVEMENT_LINK=/https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]+/g;
+/* A link ends before trailing punctuation and before a ) it did not open; what was cut stays in the sentence. */
+function achievementLinkSplit(raw){
+  let url=raw.replace(/[.,;:!?]+$/,'');
+  while(url.endsWith(')')&&(url.match(/\(/g)||[]).length<(url.match(/\)/g)||[]).length)url=url.slice(0,-1);
+  return [url,raw.slice(url.length)];
+}
+/* The host the browser will really open, not what sits before an @. */
+const achievementHost=u=>{try{return typeof URL==='function'?new URL(u).host:(u.match(/^https?:\/\/(?:[^/?#@]*@)?([^/?#@]+)/)||[])[1]||''}catch{return ''}};
 const ACHIEVEMENT_SAID={'顺利':'{0}觉得很顺利','一般':'{0}认为进展一般','困难':'{0}觉得有些困难','阻塞':'{0}说遇到了阻塞'};
 function achievementTaskHTML(t){
   const done=t.status==='done',who=t.completedBy||t.assignee,text=String(t.completionSummary||'');
-  const links=[...new Set((text.match(ACHIEVEMENT_LINK)||[]).map(u=>u.replace(/[.,;:!?)\]]+$/,'')))];
-  const note=text.replace(ACHIEVEMENT_LINK,'').replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').replace(/ ([，。；、！？])/g,'$1').trim();
-  const host=u=>u.replace(/^https?:\/\/([^/?#]+).*$/,'$1');
+  const links=[];
+  const note=text.replace(ACHIEVEMENT_LINK,m=>m.split(/,(?=https?:\/\/)/).map(part=>{
+    const [url,tail]=achievementLinkSplit(part);if(!achievementHost(url))return part;
+    if(!links.includes(url))links.push(url);return tail;
+  }).join('')).replace(/[（(]\s*[）)]/g,'').replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').replace(/ ([，。；、！？.,;:!?])/g,'$1').trim();
   const name=who?nameOf(who):'—',said=tr(ACHIEVEMENT_SAID[t.completionFeeling]||'{0}说',name);
   const words=done&&(note||ACHIEVEMENT_SAID[t.completionFeeling])?`<p>${escapeHTML(note?tr('{0}：{1}',said,note):said)}</p>`:'';
-  return `<li class="${done?'is-done':''}"><div><b>${escapeHTML(t.name)}</b><span>${escapeHTML(name)} · ${done?`${tr('已完成')} ✅`:status(t)[1]}</span>`
-    +`${done?links.map(u=>`<a href="${escapeHTML(u)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHTML(host(u))}</a>`).join(''):''}</div>${words}</li>`;
+  return `<li><div><b>${escapeHTML(t.name)}</b><span>${escapeHTML(name)} · ${done?`${tr('已完成')} ✅`:status(t)[1]}</span>`
+    +`${done?links.map(u=>`<a href="${escapeHTML(u)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHTML(achievementHost(u))}</a>`).join(''):''}</div>${words}</li>`;
 }
 /* Work-log rows and 成果库 cards open the live task or project while it is still
    in the snapshot. A finished project only lives in the archive payload, so it

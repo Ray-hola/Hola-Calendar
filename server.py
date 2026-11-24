@@ -3203,7 +3203,7 @@ class Store:
                 'taskStats': counts, 'lifecycle': lifecycle,
                 'tasks': [{'id': t.get('id'), 'name': t.get('name', ''), 'assignee': t.get('assignee'),
                            'status': t.get('status'), 'date': t.get('date'), 'completedAt': t.get('completedAt'),
-                           'completedBy': t.get('completedBy'), 'completionSummary': t.get('completionSummary', ''),
+                           'completedBy': t.get('completedBy'), 'completionSummary': t.get('completionSummary') or (t.get('approval') or {}).get('summary', ''),
                            'completionFeeling': t.get('completionFeeling', '')}
                           for t in leaves],
             })
