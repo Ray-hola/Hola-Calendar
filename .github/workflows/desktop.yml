@@ -70,6 +70,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Integration test against server.py
         run: |
+          # Windows has no system time-zone database; server.py's zoneinfo needs the tzdata package.
+          python -m pip install --quiet tzdata
           & desktop\windows\scripts\integration-test.ps1
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package

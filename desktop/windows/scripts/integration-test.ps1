@@ -21,7 +21,7 @@ $server = Start-Process $python -ArgumentList "`"$Repo\server.py`" --port $Port 
 $fails = 0
 try {
   $up = $false
-  for ($i = 0; $i -lt 50 -and -not $up; $i++) {
+  for ($i = 0; $i -lt 50 -and -not $up -and -not $server.HasExited; $i++) {
     try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/api/health" -TimeoutSec 3 | Out-Null; $up = $true } catch { Start-Sleep -Milliseconds 200 }
   }
   if (-not $up) { Get-Content "$Work\server.err"; Write-Host 'server did not start'; exit 1 }
@@ -86,7 +86,8 @@ try {
 }
 finally {
   # The py launcher starts python.exe as a child, so the whole tree goes.
-  & taskkill /T /F /PID $server.Id 2>&1 | Out-Null
+  $ErrorActionPreference = 'Continue'
+  if (-not $server.HasExited) { & taskkill /T /F /PID $server.Id 2>&1 | Out-Null }
   Start-Sleep -Milliseconds 300
   Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 }
