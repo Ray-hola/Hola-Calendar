@@ -2089,12 +2089,15 @@ function renderProjectSpace(id){
 /* Redrawing the same space keeps 项目背景 typed but not saved, with its mode and caret. */
 function holdSpaceBackground(box,id){
   const bg=$('#spaceBackground'),root=$('#spaceBackgroundEditor');
-  if(box.dataset?.meetingProject!==id||!bg||root?.dataset?.saved==null||docText(bg)===root.dataset.saved)return ()=>{};
-  const kept={value:bg.value,mode:root.dataset.mode,start:bg.selectionStart,end:bg.selectionEnd,focus:document.activeElement===bg};
+  if(box.dataset?.meetingProject!==id||box.dataset?.meetingOwner!==S.user?.id||!bg||root?.dataset?.saved==null||docText(bg)===root.dataset.saved)return ()=>{};
+  const kept={value:bg.value,saved:root.dataset.saved,pending:root.dataset.pending,mode:root.dataset.mode,start:bg.selectionStart,end:bg.selectionEnd,focus:document.activeElement===bg};
   return ()=>{
     const again=$('#spaceBackgroundEditor'),input=$('#spaceBackground');if(!again||!input)return;
+    /* Someone else changed the background meanwhile: their text stays, and the draft is not laid over it. */
+    if(![kept.saved,kept.pending,docText({value:kept.value,tagName:'TEXTAREA'})].includes(again.dataset.saved)){toast(tr('项目背景已被别人修改，你没保存的内容没有放回'));return}
+    if(kept.pending!=null)again.dataset.pending=kept.pending;
     mdSet(again,kept.value);mdShow(again,kept.mode||'edit',false);input.oninput?.();
-    if(kept.focus){input.focus?.();input.setSelectionRange?.(kept.start,kept.end)}
+    if(kept.focus){input.focus?.({preventScroll:true});input.setSelectionRange?.(kept.start,kept.end)}
   };
 }
 /* Tabs follow the usual pattern: click or arrow keys move, Home/End jump.
@@ -2364,7 +2367,7 @@ async function openMarkdownFile(p,id){
 }
 async function uploadProjectFiles(p,list,skipped=0){
   const picked=[...list],files=picked.filter(f=>f.size>0);skipped+=picked.length-files.length;
-  if(!files.length){if(skipped)toast(tr('文件夹和空文件不能上传，请拖入其中的文件'));return}
+  if(!files.length){if(skipped)toast(tr('文件夹和空文件不能上传'));return}
   const big=files.find(f=>f.size>MAX_FILE_MB*1000000);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
   toast(tr('正在上传 {0} 个文件…',files.length));
   try{
@@ -2386,18 +2389,20 @@ function bindProjectSpace(p){
     let saved=docText(bg),saving=false;
     const editor=$('#spaceBackgroundEditor');if(editor?.dataset)editor.dataset.saved=saved;
     /* Saved reads as a quiet note; only unsaved text turns it into a button. */
-    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?tr('保存中…'):dirty?tr('保存'):tr('已保存');
+    const sync=()=>{const dirty=docText(bg)!==(editor?.dataset?.saved??saved);btn.disabled=saving||!dirty;btn.textContent=saving?tr('保存中…'):dirty?tr('保存'):tr('已保存');
       btn.classList?.toggle('is-idle',!saving&&!dirty)};
 
     bg.oninput=sync;
     btn.onclick=async()=>{
       if(saving)return;
-      const submitted=docText(bg);saving=true;sync();
+      const submitted=docText(bg);saving=true;sync();if(editor?.dataset)editor.dataset.pending=submitted;
       if(await save({background:submitted})){
         saved=submitted;if(editor?.dataset)editor.dataset.saved=saved;
-        toast(docText(bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
+        const live=bg.isConnected===false&&UI.space===p.id?$('#spaceBackground'):bg,liveEditor=$('#spaceBackgroundEditor');
+        if(live&&live!==bg&&liveEditor?.dataset){liveEditor.dataset.saved=submitted;delete liveEditor.dataset.pending;live.oninput?.()}
+        toast(docText(live||bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
       }
-      saving=false;sync();
+      saving=false;if(editor?.dataset)delete editor.dataset.pending;sync();
     };
   }
   $$('#projectSpace .staff-role').forEach(input=>input.onchange=()=>{
@@ -4961,7 +4966,7 @@ function tourDone(){try{return localStorage.getItem(`${TOUR_KEY}:${S.user?.id}`)
 function cancelTourOffer(){if(tourOfferTimer)clearTimeout(tourOfferTimer);tourOfferTimer=0}
 /* The tour waits while anything is being written, so it never takes the focus from it. */
 function tourBusy(){return Boolean(UI.docDirty||meetingLive.session||meetingLive.active
-  ||document.activeElement?.closest?.('input:not([type=checkbox],[type=radio],[type=button],[type=submit]),textarea,[contenteditable]:not([contenteditable="false"])')
+  ||document.activeElement?.closest?.('input:not([type=checkbox],[type=radio],[type=button],[type=submit],[type=reset],[type=range],[type=color],[type=file]),select,textarea,[contenteditable]:not([contenteditable="false"])')
   ||$('#meetingEditor')?.dataset?.dirty==='true'
   ||['#modalBackdrop','#taskDrawer','#agentPanel'].some(s=>{const el=$(s);return el&&!el.classList.contains('hidden')}))}
 function offerTour(){
@@ -7515,7 +7520,7 @@ async function planSubmit(board,items=null){
   if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
   const candidates=planOpenCards(board).filter(x=>items===null||items.includes(x));if(!candidates.length)return;
   board.busy=true;agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();planRender(board);
-  const results={create:0,update:0,delete:0,approval:0,failed:0};
+  const results={create:0,update:0,delete:0,approval:0,failed:0,used:0};
   const submit=async(x,kind)=>{
     if(!await agentWaitForResume())return;
     const op=planOperation(x),path=kind==='project'?(op==='create'?{mode:projectMode()}:planMutationPath(x,kind)):planTaskPath(board,x);
@@ -7536,9 +7541,10 @@ async function planSubmit(board,items=null){
       planSettleHistory(board);
     }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;
       /* The server already ran this card with other content: those edits were not sent. */
-      const used=e?.status===409&&/已执行/.test(String(e.raw??e.message??''));if(used)x.usedCard=true;
+      const used=e?.status===409&&/已执行/.test(String(e.raw??e.message??''));
+      if(used&&path.mode==='approval')x.error=tr('这张卡片的申请已经提交过，等审批结果即可');else if(used)x.usedCard=true;
       if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);
-        if(x.state==='done'&&used)x.result=tr('此前已执行；这次的修改没有提交');else if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
+        if(x.state==='done'&&used){x.result=tr('此前已执行；这次的修改没有提交');results.failed--;results.used++}else if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{
@@ -7548,7 +7554,7 @@ async function planSubmit(board,items=null){
     for(const p of board.projects.filter(p=>candidates.includes(p)&&planPending(p)&&planOperation(p)==='delete'))await submit(p,'project');
     try{await refresh()}catch(_){}
   }finally{board.busy=false;agentState.busy=false;agentUpdateBusy()}
-  const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
+  const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.used?tr('{0} 张卡片此前已执行，这次的修改没有提交',results.used):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
   board.closedNote=parts.join(tr('，'));
   planRender(board);agentAppend('assistant',`${board.closedNote||tr('没有提交新的改动')}${tr('。')}`);
 }

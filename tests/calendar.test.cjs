@@ -1619,6 +1619,19 @@ test('redrawing the same project space keeps unsaved 项目背景, its mode and 
   els['#spaceBackgroundEditor'].dataset.saved='没保存的背景';
   a.run(`holdSpaceBackground({dataset:{meetingProject:'A'}},'A')()`);
   assert.deepEqual(a.json('put'),[],'saved text is simply redrawn');
+  els['#spaceBackgroundEditor'].dataset.saved='已保存的';
+  a.run(`S.user={id:'u2'};holdSpaceBackground({dataset:{meetingProject:'A',meetingOwner:'u1'}},'A')()`);
+  assert.deepEqual(a.json('put'),[],'another account never gets this draft');
+  a.run(`var toasts=[];toast=m=>toasts.push(m);var restore=holdSpaceBackground({dataset:{meetingProject:'A',meetingOwner:'u2'}},'A')`);
+  els['#spaceBackgroundEditor'].dataset.saved='别人刚改的';
+  a.run('restore()');
+  assert.deepEqual(a.json('put'),[],'a draft is not laid over text someone else just saved');
+  assert.equal(a.json('toasts').length,1,'and that is said');
+  els['#spaceBackgroundEditor'].dataset.saved='已保存的';els['#spaceBackgroundEditor'].dataset.pending='没保存的';
+  a.run(`restore=holdSpaceBackground({dataset:{meetingProject:'A',meetingOwner:'u2'}},'A')`);
+  els['#spaceBackgroundEditor'].dataset.saved='没保存的';
+  a.run('restore()');
+  assert.deepEqual(a.json('put'),['没保存的背景','preview'],'the server now holding our own save in flight is fine');
   assert.match(source,/const restoreBackground=holdSpaceBackground\(box,id\);\s*box\.innerHTML=/,'held before the space is redrawn');
 });
 
@@ -4764,6 +4777,8 @@ test('a card the server already ran is said so, and a reload frees it under a ne
   await a.run('planSubmit(board,[board.tasks[0]])');
   assert.equal(a.run('board.tasks[0].state'), 'done');
   assert.equal(a.run('board.tasks[0].result'), '此前已执行；这次的修改没有提交', 'not reported as accepted');
+  assert.match(a.run('board.closedNote'), /1 张卡片此前已执行，这次的修改没有提交/);
+  assert.doesNotMatch(a.run('board.closedNote'), /未接受/, 'nor as refused');
   a.run(make(''));sent.length = 0;
   await a.run('planSubmit(board,[board.tasks[0]])');
   assert.equal(a.run('board.tasks[0].usedCard'), true);
