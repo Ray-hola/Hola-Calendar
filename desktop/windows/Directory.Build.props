@@ -1,0 +1,26 @@
+<Project>
+  <!-- Shared by every project here. .NET Framework 4.8 ships with Windows 10
+       and 11, so the app is one small exe with nothing to install first. -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <!-- Some shells export PLATFORM; the build must not pick it up. -->
+    <Platform>AnyCPU</Platform>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Company>Hola</Company>
+    <Product>哗啦待办</Product>
+    <Version>1.0.0</Version>
+    <!-- HolaCore is compiled into each exe, so the app stays a single file. -->
+    <HolaCore>$(MSBuildThisFileDirectory)src\HolaCore\</HolaCore>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(HolaCore)*.cs" Link="HolaCore\%(Filename)%(Extension)" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+</Project>

@@ -1,8 +1,8 @@
-# 哗啦待办 · 桌面伴侣（macOS）
+# 哗啦待办 · 桌面伴侣（macOS / Windows）
 
 菜单栏小应用：把网页版「桌面小组件」搬到 Mac 上——今日待办、25/5 番茄钟、刘海「灵动岛」、Touch Bar，开机自启，两种风格（Anthropic风 / Tempo风）。原生 Swift，不装浏览器内核，常驻约 45 MB。
 
-调研与选型见 [RESEARCH.md](RESEARCH.md)。
+Windows 版功能相同，见下文「[Windows](#windows)」。调研与选型见 [RESEARCH.md](RESEARCH.md)。
 
 ## 目录
 
@@ -19,6 +19,15 @@ desktop/
     scripts/build.sh              只用 swiftc 构建并打包 .app（无需 Xcode）
     scripts/make-icon.sh          由 assets/logo/icon-sweep.svg 生成 .icns
     scripts/integration-test.sh   起一个临时 server.py 跑端到端
+  windows/
+    Directory.Build.props         共用设置：.NET Framework 4.8，HolaCore 源码编进每个 exe
+    src/HolaCore/                 与 macOS 的 HolaCore 一一对应的 C# 版本，另有凭据管理器和设置文件
+    src/HolaDesktop/              托盘应用：面板、主题、吉祥物、顶部岛、开机自启、hola:// 链接
+    src/holactl/                  命令行客户端
+    tests/HolaCoreTests/          单元测试（自带极简断言）
+    scripts/build.ps1             构建 / 测试 / 运行 / 安装 / 卸载
+    scripts/make-icon.ps1         画出 .ico
+    scripts/integration-test.ps1  起一个临时 server.py 跑端到端
 ```
 
 ## 构建与运行
@@ -92,6 +101,40 @@ Mac 没有真正的灵动岛。番茄钟运行时，屏顶中央出现一个黑�
 
 需要人试：弹窗登录与勾选；刘海岛的外观与悬停展开；外接屏切换；Touch Bar（需要 2016–2019 MacBook Pro）；开机自启开关（把 .app 放进「应用程序」后试）；两种风格的动画观感。
 
+## Windows
+
+托盘小应用，功能与 Mac 版相同：今日待办（勾选同样走 `task.complete`）、25/5 番茄钟、屏幕顶部的「岛」、开机自启、两种风格、连接任意服务器、`hola://` 链接。用 WPF 写成，不用 XAML，界面都在 C# 里搭，对应 SwiftUI 的写法。依赖 .NET Framework 4.8，Windows 10 1903 以后和 Windows 11 自带，不用另装运行时。产物是一个约 120 KB 的 `哗啦待办.exe`。
+
+```powershell
+cd desktop\windows
+scripts\build.ps1                 # 产出 build\哗啦待办.exe、build\holactl.exe、build\哗啦待办-windows.zip
+scripts\build.ps1 test            # 单元测试
+scripts\build.ps1 run             # 构建并打开
+scripts\build.ps1 install         # 复制到 %LOCALAPPDATA%\Programs\哗啦待办，加开始菜单项并打开
+scripts\build.ps1 uninstall       # 删掉 install 加的文件和注册表项；设置和登录状态保留
+scripts\integration-test.ps1      # 端到端：临时起 server.py，登录、列今日、完成、核对 403/409
+```
+
+构建只需要 .NET SDK（任何能编 .NET Framework 4.8 项目的版本，本机用的是 7.0），不需要 Visual Studio，也不从网上下包。exe 没有代码签名，第一次打开时 SmartScreen 可能提示「已保护你的电脑」，点「更多信息 → 仍要运行」。
+
+与 Mac 版的区别：
+
+- **托盘图标**代替菜单栏图标：左键开关面板，右键是快捷菜单（开始/暂停、切换模式、打开面板、立即同步、退出）。番茄钟运行时图标显示剩余分钟数，悬停提示显示倒计时和剩余项数。面板贴着托盘弹出，点别处或按 Esc 关闭。
+- **岛**：Windows 没有刘海，所以用的是 Mac 无刘海机型上的黑色药丸，放在鼠标所在屏幕的工作区顶部正中。悬停展开、点一下暂停/继续、番茄钟停止后隐藏，都与 Mac 相同。它不抢焦点，也不出现在 Alt+Tab 里。
+- **Touch Bar** 在 Windows 上没有对应的东西，没做。
+- **登录状态**只存在 Windows 凭据管理器里（控制面板 → 凭据管理器 → Windows 凭据，名称是 `cn.hola.desktop.session:<服务器地址>`），不写文件。服务器地址、用过的服务器、用户名、风格、番茄钟状态存在 `%LOCALAPPDATA%\HolaDesktop\settings.json`。
+- **开机时启动**写在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，任务管理器「启动应用」里能看到、能关；在那里关掉后，面板里的勾也显示为关。
+- **`hola://` 链接**：每次启动都把 `HKCU\Software\Classes\hola` 指向当前这个 exe，网页版「在桌面 App 中打开」就能找到它。同一账户只运行一份：再打开 exe 或点链接时，地址交给已经运行的那份，并打开面板。
+- 休眠时停表、唤醒后立即同步；轮询、离线、401、服务器拒绝的处理与 Mac 版一致（状态逻辑逐行移植）。
+
+已验证（本机 Windows 11，.NET SDK 7.0.304）：
+
+- `scripts\build.ps1`：0 警告。`scripts\build.ps1 test`：187 项断言全部通过（番茄钟、今日筛选、API 请求头/Cookie/错误映射、连接与地址判断、服务器列表、凭据管理器读写）。
+- `scripts\integration-test.ps1`：全部通过。
+- 用 UI 自动化在演示服务器上走了一遍：连接 → 登录 → 勾选完成 → 开始番茄钟（岛出现）→ 切到 Tempo风 → 退出重开（登录、风格、运行中的番茄钟都恢复）→ 打开 `hola://connect` 链接（已运行的那份填好了地址）→ 开机自启开关（注册表随之写入和删除）。常驻工作集约 110 MB。
+
+需要人试：鼠标悬停时岛展开的样子；多显示器和不同缩放比例；任务栏在顶部或侧边时面板的位置；Windows 10 上的字体（没有 Cascadia Mono 时 Tempo风退回 Consolas）。
+
 ---
 
 ## English
@@ -110,3 +153,5 @@ scripts/integration-test.sh   # spins up a throwaway server.py and exercises log
 **Connect, then sign in**: the app is not tied to any server. Click the menu-bar icon, type your team's address (e.g. `work.example.com`) and press 连接: the app checks `GET /api/info` (falling back to `/api/health` on older servers), trying https first for public hosts and http first on the LAN, then asks for account and password. The web app's account menu has 「连接桌面 App」, which hands its own address over as `hola://connect?server=…`; the link only fills the address in. Servers you have used are remembered (up to 8) and switch in one click, each with its own session in the Keychain. The `wc_session` token goes to the Keychain only. Polling every 45 s, paused during sleep; offline keeps the last list; 401 signs out.
 
 **Launch at login**: the checkbox in the popover footer (works once the app runs from a `.app` bundle, ideally in /Applications).
+
+**Windows** (`desktop\windows`): the same companion as a notification-area app in WPF (no XAML) on .NET Framework 4.8, which Windows 10 1903+ and 11 already include, so the result is one ~120 KB exe. Left click opens the panel, right click the quick menu; the tray icon shows the minutes left while a session runs. The island is the no-notch pill at the top centre of the screen under the pointer. No Touch Bar. Sessions live in Windows Credential Manager (`cn.hola.desktop.session:<server>`), other settings in `%LOCALAPPDATA%\HolaDesktop\settings.json`; launch at login uses the HKCU Run key; `hola://` is registered per user on each start, and a second start hands its link to the running copy. Build with any .NET SDK that can target net48: `scripts\build.ps1` (`test`, `run`, `install`, `uninstall`), `scripts\integration-test.ps1`. The exe is unsigned, so SmartScreen may ask once.

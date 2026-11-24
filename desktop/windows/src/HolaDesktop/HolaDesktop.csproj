@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The tray app. WPF without XAML: every view is built in code, like the
+       SwiftUI views of the macOS app, so there is nothing to compile but C#. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>HolaDesktop</AssemblyName>
+    <RootNamespace>Hola.Desktop</RootNamespace>
+    <StartupObject>Hola.Desktop.Program</StartupObject>
+    <Title>哗啦待办</Title>
+  </PropertyGroup>
+  <!-- scripts/build.ps1 draws the icon first; a plain `dotnet build` still works without it. -->
+  <PropertyGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\build\app.ico')">
+    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\build\app.ico</ApplicationIcon>
+  </PropertyGroup>
+</Project>

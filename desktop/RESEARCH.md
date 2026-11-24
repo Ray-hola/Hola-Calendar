@@ -37,3 +37,7 @@
 ## 服务端建议（本次未改 server.py）
 
 `/api/state` 是全量快照（任务、日志、报告、日记、会议…），桌面端每 45 s 拉一次对团队库而言偏重。建议加一个轻量只读接口，例如 `GET /api/today`，只返回 `{user, today, tasks(今天活跃、属于本人), projects(id,name,status)}` 并支持 `If-None-Match`/`ETag` 返回 304。客户端已按「拿到快照就筛选」的方式写，接口一旦存在只需把路径换掉。
+
+## Windows 版选型（2026-11-25）
+
+本机：Windows 11，.NET SDK 7.0.304，.NET Framework 4.8.1 与 4.8 参考程序集已装。选 WPF + .NET Framework 4.8：系统自带运行时，exe 约 120 KB，不用打包运行时，也没有 .NET 7/8 已过支持期的问题；托盘用 WinForms 的 NotifyIcon，令牌存凭据管理器（CredWrite/CredRead），开机自启和 `hola://` 都写 HKCU，不要管理员权限。没用 XAML，免得 SDK 风格项目在 net48 上编 XAML 出问题。Electron / Tauri 的理由同上文：常驻内存更大，构建还要额外工具链。
