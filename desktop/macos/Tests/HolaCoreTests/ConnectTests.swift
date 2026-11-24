@@ -114,6 +114,12 @@ func connectTests() async {
         for i in 0..<12 { many = ServerList.remember(SavedServer(url: "https://s\(i).example.com", name: "", username: ""), in: many) }
         check(many.count, ServerList.limit)
         check(many.first?.url, "https://s11.example.com")
+        // The server in use stays on the list; the oldest other one goes instead.
+        let kept = ServerList.remember(SavedServer(url: "https://new.example.com", name: "", username: ""), in: many, keeping: "https://s4.example.com")
+        check(kept.count, ServerList.limit)
+        check(kept.last?.url, "https://s4.example.com")
+        check(!kept.contains { $0.url == "https://s5.example.com" }, "s5 should be pushed off instead")
+        check(ServerList.remember(a, in: many, keeping: "https://s11.example.com").map(\.url), ServerList.remember(a, in: many).map(\.url))
         check(ServerList.decode(ServerList.encode(list)), list)
         check(ServerList.decode(Data("not json".utf8)).isEmpty)
         check(ServerList.decode(nil).isEmpty)

@@ -96,8 +96,13 @@ public enum ServerList {
     public static let limit = 8
 
     /// `server` moves to the front; an older entry for the same address is replaced.
-    public static func remember(_ server: SavedServer, in list: [SavedServer]) -> [SavedServer] {
-        Array(([server] + list.filter { $0.url != server.url }).prefix(limit))
+    /// `keeping` (the server in use) is never the one pushed off the end.
+    public static func remember(_ server: SavedServer, in list: [SavedServer], keeping: String? = nil) -> [SavedServer] {
+        let all = [server] + list.filter { $0.url != server.url }
+        guard let keeping, let kept = all.dropFirst(limit).first(where: { $0.url == keeping }) else {
+            return Array(all.prefix(limit))
+        }
+        return Array(all.prefix(limit - 1)) + [kept]
     }
 
     public static func forget(_ url: String, in list: [SavedServer]) -> [SavedServer] {

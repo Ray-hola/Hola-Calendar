@@ -161,7 +161,7 @@ import ServiceManagement
     /// Drops a remembered server and its kept session.
     func forget(_ saved: SavedServer) {
         forgotten.insert(saved.url)
-        if saved.url == server?.url.absoluteString { choice += 1; connectChoice += 1; signOut(); server = nil }
+        if saved.url == server?.url.absoluteString { choice += 1; signOut(); server = nil }
         else if let t = Keychain.load(account: saved.url), let url = HolaAPI.normalize(saved.url) {
             // Its session is closed on the server too, not only forgotten here.
             Concurrency.Task { try? await HolaAPI(baseURL: url).logout(token: t) }
@@ -171,10 +171,11 @@ import ServiceManagement
     }
 
     /// Remembers `saved` first; a server pushed off the end of the list loses its kept session.
+    /// The current server is never the one pushed off.
     private func remember(_ saved: SavedServer) {
-        let next = ServerList.remember(saved, in: servers)
-        // The current server keeps its session even if a late sign-in pushed it off the list.
-        for gone in servers where !next.contains(where: { $0.url == gone.url }) && gone.url != server?.url.absoluteString {
+        let current = server?.url.absoluteString
+        let next = ServerList.remember(saved, in: servers, keeping: current)
+        for gone in servers where !next.contains(where: { $0.url == gone.url }) && gone.url != current {
             Keychain.delete(account: gone.url)
         }
         servers = next
@@ -189,30 +190,37 @@ import ServiceManagement
         syncing = true
         var token: String?, failure: String?
         do {
-            let t = try await client.login(username: account, password: password)
-            try Keychain.save(token: t, account: url.absoluteString)
-            token = t
+            token = try await client.login(username: account, password: password)
         } catch let e as APIError {
             failure = e.errorDescription
         } catch {
-            failure = "无法保存登录状态：\(error.localizedDescription)"
+            failure = error.localizedDescription
         }
-        // Another server was picked while signing in: keep this session for when it is picked again,
-        // unless this one was 移除'd meanwhile, in which case the session is closed again.
-        guard choice == asked else {
+        let key = url.absoluteString
+        // The same server picked again meanwhile, with no other sign-in under way: this one still counts.
+        let again = choice != asked && key == server?.url.absoluteString && !signedIn && !syncing && !forgotten.contains(key)
+        guard choice == asked || again else {
             guard let t = token else { return }
-            if forgotten.contains(url.absoluteString) {
-                Keychain.delete(account: url.absoluteString)
+            // Another server was picked: keep this session for when it is picked again.
+            // It is closed instead if this server was 移除'd, or is current and signed in another way.
+            if forgotten.contains(key) || key == server?.url.absoluteString || (try? Keychain.save(token: t, account: key)) == nil {
                 Concurrency.Task { try? await client.logout(token: t) }
             } else {
-                remember(SavedServer(url: url.absoluteString, name: name, username: account))
+                remember(SavedServer(url: key, name: name, username: account))
             }
             return
         }
         syncing = false
         if let t = token {
+            do {
+                try Keychain.save(token: t, account: key)
+            } catch {
+                notice = "无法保存登录状态：\(error.localizedDescription)"
+                Concurrency.Task { try? await client.logout(token: t) }
+                return
+            }
             self.token = t; api = client; signedIn = true; notice = nil; offline = false
-            remember(SavedServer(url: url.absoluteString, name: name, username: account))
+            remember(SavedServer(url: key, name: name, username: account))
             startPolling()
         } else {
             notice = failure
