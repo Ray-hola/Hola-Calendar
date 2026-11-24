@@ -129,7 +129,7 @@ namespace Hola.Core
                 {
                     var text = resp.Content == null ? "" : await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                     var cookies = resp.Headers.TryGetValues("Set-Cookie", out var v) ? v.ToList() : new List<string>();
-                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies, Location = resp.Headers.Location == null ? null : new Uri(url, resp.Headers.Location).AbsoluteUri };
+                    return new Reply { Status = (int)resp.StatusCode, Body = text, SetCookies = cookies, Location = Absolute(url, resp.Headers.Location) };
                 }
             }
             catch (HttpRequestException e) { throw new ApiException(ApiErrorKind.Offline, (e.InnerException ?? e).Message); }
@@ -138,6 +138,9 @@ namespace Hola.Core
             // Anything else on the way (a bad charset, a broken stream) is the network too, as in the macOS client.
             catch (Exception e) when (!(e is ApiException)) { throw new ApiException(ApiErrorKind.Offline, e.Message); }
         }
+
+        static string Absolute(Uri from, Uri location) =>
+            location == null ? null : Uri.TryCreate(from, location, out var abs) ? abs.AbsoluteUri : location.OriginalString;
 
         internal static void Check(Reply r)
         {

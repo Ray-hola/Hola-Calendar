@@ -35,8 +35,14 @@ namespace Hola.Core
 
         static string Read(string file)
         {
-            try { return File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : null; }
-            catch (IOException) { return null; } catch (UnauthorizedAccessException) { return null; }
+            for (var attempt = 0; ; attempt++)
+            {
+                try { return File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : null; }
+                // Antivirus or the indexer can hold the file for a moment at startup.
+                catch (IOException) when (attempt < 2) { Thread.Sleep(50); }
+                catch (IOException) { return null; }
+                catch (UnauthorizedAccessException) { return null; }
+            }
         }
 
         public string Get(string key) => values.Str(key);

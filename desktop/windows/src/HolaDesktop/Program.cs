@@ -79,17 +79,21 @@ namespace Hola.Desktop
             lock (logLock)
             {
                 if (text == lastLogged) return;
-                lastLogged = text;
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(CrashLog));
-                    if (File.Exists(CrashLog) && new FileInfo(CrashLog).Length > 1 << 20)
+                    try
                     {
-                        var old = Path.ChangeExtension(CrashLog, ".old.log");
-                        File.Delete(old);
-                        File.Move(CrashLog, old);
+                        if (File.Exists(CrashLog) && new FileInfo(CrashLog).Length > 1 << 20)
+                        {
+                            var old = Path.ChangeExtension(CrashLog, ".old.log");
+                            File.Delete(old);
+                            File.Move(CrashLog, old);
+                        }
                     }
+                    catch (IOException) { }   // held open elsewhere: keep appending to it
                     File.AppendAllText(CrashLog, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {text}{Environment.NewLine}{Environment.NewLine}", Encoding.UTF8);
+                    lastLogged = text;
                 }
                 catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
@@ -129,8 +133,9 @@ namespace Hola.Desktop
                     // This start came from a click, so it may hand the foreground on: the panel then gets the focus.
                     if (GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid))
                     {
-                        if (!IsOurs((int)pid)) return;   // someone else holds the name: they get nothing
-                        AllowSetForegroundWindow(pid);
+                        var owner = Owner((int)pid);
+                        if (owner == false) return;   // someone else holds the name: they get nothing
+                        if (owner == true) AllowSetForegroundWindow(pid);
                     }
                     var bytes = Encoding.UTF8.GetBytes(server);
                     pipe.Write(bytes, 0, Math.Min(bytes.Length, MaxMessage));
@@ -139,17 +144,33 @@ namespace Hola.Desktop
             catch (Exception e) when (e is IOException || e is TimeoutException || e is UnauthorizedAccessException) { }
         }
 
-        /// <summary>The pipe's owner is this app (any copy of it) in this session, not something squatting on the name.</summary>
-        static bool IsOurs(int pid)
+        const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder name, ref int size);
+        [DllImport("kernel32.dll")] static extern bool ProcessIdToSessionId(int pid, out int session);
+
+        /// <summary>
+        /// Whether the pipe's owner is this app (any copy of it) in this session: true, false, or
+        /// null when it cannot be told. Limited query rights also work on a copy run as administrator.
+        /// </summary>
+        static bool? Owner(int pid)
         {
+            var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (handle == IntPtr.Zero) return null;
             try
             {
-                using (var p = Process.GetProcessById(pid))
-                using (var me = Process.GetCurrentProcess())
-                    return p.SessionId == me.SessionId
-                        && string.Equals(p.MainModule.FileVersionInfo.InternalName, me.MainModule.FileVersionInfo.InternalName, StringComparison.OrdinalIgnoreCase);
+                var name = new StringBuilder(1024); var size = name.Capacity;
+                if (!QueryFullProcessImageName(handle, 0, name, ref size)) return null;
+                if (!ProcessIdToSessionId(pid, out var theirs) || !ProcessIdToSessionId(Process.GetCurrentProcess().Id, out var mine)) return null;
+                if (theirs != mine) return false;
+                // The build stamps the exe's own name inside it, which stays the same when the file is renamed or copied.
+                string them = FileVersionInfo.GetVersionInfo(name.ToString()).InternalName, me = FileVersionInfo.GetVersionInfo(Startup.ExePath).InternalName;
+                return string.Equals(them, me, StringComparison.OrdinalIgnoreCase);
             }
-            catch (Exception) { return false; }
+            catch (Exception e) when (e is IOException || e is System.ComponentModel.Win32Exception || e is UnauthorizedAccessException) { return null; }
+            finally { CloseHandle(handle); }
         }
 
         /// <summary>Only this account may connect, and only from this machine.</summary>
