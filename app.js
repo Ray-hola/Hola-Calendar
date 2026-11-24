@@ -2074,6 +2074,7 @@ function renderProjectSpace(id){
     $$('#projectSpace [data-space-tab]').forEach(b=>{const key=b.dataset.spaceTab,on=key===tab;b.innerHTML=SPACE_TABS[key]+(counts[key]==null?'':` <span>${counts[key]}</span>`);b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;const pane=$(`#spacePanel-${key}`);if(pane)pane.hidden=!on});
     $('#projectMeetingList').innerHTML=projectMeetingList(p);bindProjectCards();bindMeetingList(p);return;
   }
+  const restoreBackground=holdSpaceBackground(box,id);
   box.innerHTML=(p.desc?`<p class="space-description">${escapeHTML(p.desc)}</p>`:'')
     +`<div class="space-facts">${factsHTML}</div>`
     +projectSpaceTabs(p,keys,counts,tab)
@@ -2083,7 +2084,21 @@ function renderProjectSpace(id){
     +panel('people',projectStaffing(p,manage))
     +panel('about',projectLifecycle(p,manage)+projectBackground(p,manage));
   box.dataset.meetingProject=id;box.dataset.meetingOwner=S.user?.id;box.dataset.readonly=String(Boolean(archive));
-  bindProjectCards();bindProjectSpace(p);bindMeetingList(p);bindProjectContentTabs();
+  bindProjectCards();bindProjectSpace(p);bindMeetingList(p);bindProjectContentTabs();restoreBackground();
+}
+/* Redrawing the same space keeps 项目背景 typed but not saved, with its mode and caret. */
+function holdSpaceBackground(box,id){
+  const bg=$('#spaceBackground'),root=$('#spaceBackgroundEditor');
+  if(box.dataset?.meetingProject!==id||box.dataset?.meetingOwner!==S.user?.id||!bg||root?.dataset?.saved==null||docText(bg)===root.dataset.saved)return ()=>{};
+  const kept={value:bg.value,saved:root.dataset.saved,pending:root.dataset.pending,mode:root.dataset.mode,start:bg.selectionStart,end:bg.selectionEnd,focus:document.activeElement===bg};
+  return ()=>{
+    const again=$('#spaceBackgroundEditor'),input=$('#spaceBackground');if(!again||!input)return;
+    /* Someone else changed the background meanwhile: their text stays, and the draft is not laid over it. */
+    if(![kept.saved,kept.pending,docText({value:kept.value,tagName:'TEXTAREA'})].includes(again.dataset.saved)){toast(tr('项目背景已被别人修改，你没保存的内容没有放回'));return}
+    if(kept.pending!=null)again.dataset.pending=kept.pending;
+    mdSet(again,kept.value);mdShow(again,kept.mode||'edit',false);input.oninput?.();
+    if(kept.focus){input.focus?.({preventScroll:true});input.setSelectionRange?.(kept.start,kept.end)}
+  };
 }
 /* Tabs follow the usual pattern: click or arrow keys move, Home/End jump.
    Leaving 会议 stops a recording and asks before dropping an unsaved draft. */
@@ -2351,7 +2366,8 @@ async function openMarkdownFile(p,id){
   };
 }
 async function uploadProjectFiles(p,list,skipped=0){
-  const files=[...list];if(!files.length)return;
+  const picked=[...list],files=picked.filter(f=>f.size>0);skipped+=picked.length-files.length;
+  if(!files.length){if(skipped)toast(tr('文件夹和空文件不能上传'));return}
   const big=files.find(f=>f.size>MAX_FILE_MB*1000000);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
   toast(tr('正在上传 {0} 个文件…',files.length));
   try{
@@ -2360,17 +2376,8 @@ async function uploadProjectFiles(p,list,skipped=0){
         headers:{'Content-Type':f.type||'application/octet-stream','X-Work-Calendar':'1','X-File-Name':encodeURIComponent(f.name)}});
       const x=await readJSON(r);if(!r.ok)throw new Error(trServer(x.error)||tr('「{0}」上传未完成',f.name));
     }
-    await refreshKeepingBackground(p);toast(skipped?tr('已上传 {0} 个文件，跳过了 {1} 个文件夹',files.length,skipped):tr('已上传 {0} 个文件',files.length));
-  }catch(e){toast(e.message);refreshKeepingBackground(p).catch(()=>{})}
-}
-/* An upload re-renders the space; 项目背景 typed but not saved is put back,
-   as long as the same project is still open. */
-async function refreshKeepingBackground(p){
-  const root=$('#spaceBackgroundEditor'),save=$('#saveBackground');
-  const draft=UI.space===p.id&&root&&save?.disabled===false?docText($('#spaceBackground')):null,mode=root?.dataset?.mode;
-  await refresh();
-  const again=$('#spaceBackgroundEditor');if(draft==null||UI.space!==p.id||!again)return;
-  mdSet(again,draft);mdShow(again,mode||'edit',false);$('#spaceBackground')?.oninput?.();
+    await refresh();toast(skipped?tr('已上传 {0} 个文件，跳过了 {1} 个文件夹或空文件',files.length,skipped):tr('已上传 {0} 个文件',files.length));
+  }catch(e){toast(e.message);refresh().catch(()=>{})}
 }
 /* Background and 分工 save in place without a full refresh, so typing in one
    field and moving to the next never loses the caret. */
@@ -2380,18 +2387,28 @@ function bindProjectSpace(p){
   const bg=$('#spaceBackground'),btn=$('#saveBackground');
   if(bg&&btn){
     let saved=docText(bg),saving=false;
+    const editor=$('#spaceBackgroundEditor');if(editor?.dataset)editor.dataset.saved=saved;
     /* Saved reads as a quiet note; only unsaved text turns it into a button. */
-    const sync=()=>{const dirty=docText(bg)!==saved;btn.disabled=saving||!dirty;btn.textContent=saving?tr('保存中…'):dirty?tr('保存'):tr('已保存');
+    const sync=()=>{const dirty=docText(bg)!==(editor?.dataset?.saved??saved);btn.disabled=saving||!dirty;btn.textContent=saving?tr('保存中…'):dirty?tr('保存'):tr('已保存');
       btn.classList?.toggle('is-idle',!saving&&!dirty)};
 
     bg.oninput=sync;
     btn.onclick=async()=>{
       if(saving)return;
-      const submitted=docText(bg);saving=true;sync();
-      if(await save({background:submitted})){
-        saved=submitted;toast(docText(bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
+      const submitted=docText(bg);saving=true;sync();if(editor?.dataset)editor.dataset.pending=submitted;
+      const ok=await save({background:submitted});
+      /* Redrawn meanwhile: the live editor is told only if it still carries this save. */
+      const liveEditor=bg.isConnected===false&&UI.space===p.id?$('#spaceBackgroundEditor'):null;
+      const carried=liveEditor?.dataset?.pending===submitted?liveEditor:null,live=carried?$('#spaceBackground'):bg;
+      if(carried){delete carried.dataset.pending;if(ok)carried.dataset.saved=submitted;live?.oninput?.()}
+      /* Saved after a redraw that left it out: show what the server now holds, unless something new is typed there. */
+      const redraw=!carried&&ok&&liveEditor&&docText($('#spaceBackground'))===liveEditor.dataset.saved;
+      if(redraw)refresh().catch(()=>{});
+      if(ok){
+        saved=submitted;if(editor?.dataset)editor.dataset.saved=saved;
+        toast(redraw||docText(live||bg)===saved?tr('项目背景已保存'):tr('已保存提交的版本，仍有未保存修改'));
       }
-      saving=false;sync();
+      saving=false;if(editor?.dataset)delete editor.dataset.pending;sync();
     };
   }
   $$('#projectSpace .staff-role').forEach(input=>input.onchange=()=>{
@@ -2417,12 +2434,11 @@ function bindProjectSpace(p){
   zone.ondrop=e=>{
     if(!dropIsUpload(e))return;
     e.preventDefault();zone.classList.toggle('is-over',false);
+    /* A folder is told by its entry; without one it arrives as an empty file, skipped with the empty files. */
     const all=[...e.dataTransfer.files],entries=[...(e.dataTransfer.items||[])].filter(i=>i.kind==='file');
-    /* Without a matching entry per file, a folder shows as an empty file with no type. */
-    const isFolder=(f,i)=>entries.length===all.length?Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory):!f.size&&!f.type;
-    const files=all.filter((f,i)=>!isFolder(f,i)),skipped=all.length-files.length;
-    if(!files.length){if(skipped)toast(tr('文件夹不能直接上传，请拖入其中的文件'));return}
-    uploadProjectFiles(p,files,skipped);
+    const isFolder=i=>entries.length===all.length&&Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory);
+    const files=all.filter((f,i)=>!isFolder(i));
+    uploadProjectFiles(p,files,all.length-files.length);
   };
 }
 const dragTypes=e=>[...(e.dataTransfer?.types||[])];
@@ -4954,7 +4970,9 @@ const TOUR_KEY='wc-tour-done';
 let tour=null,tourOfferTimer=0;
 function tourDone(){try{return localStorage.getItem(`${TOUR_KEY}:${S.user?.id}`)==='1'}catch(_){return true}}
 function cancelTourOffer(){if(tourOfferTimer)clearTimeout(tourOfferTimer);tourOfferTimer=0}
+/* The tour waits while anything is being written, so it never takes the focus from it. */
 function tourBusy(){return Boolean(UI.docDirty||meetingLive.session||meetingLive.active
+  ||document.activeElement?.closest?.('input:not([type=checkbox],[type=radio],[type=button],[type=submit],[type=reset],[type=range],[type=color],[type=file]),select,textarea,[contenteditable]:not([contenteditable="false"])')
   ||$('#meetingEditor')?.dataset?.dirty==='true'
   ||['#modalBackdrop','#taskDrawer','#agentPanel'].some(s=>{const el=$(s);return el&&!el.classList.contains('hidden')}))}
 function offerTour(){
@@ -7260,7 +7278,7 @@ function planCheckpoint(board){
    the newest one is often what the board already shows; undo skips those. */
 /* Only what the cards say is kept: ticking a card or clearing its error is not a step to undo. */
 const planCardId=x=>String(x.cardId??x.ref??x.key);
-const planCardContent=({selected,error,result,...rest})=>rest;
+const planCardContent=({selected,error,result,usedCard,...rest})=>rest;
 function planUndoState(board){
   return JSON.stringify({projects:board.projects.map(planCardContent),tasks:board.tasks.map(planCardContent),next:board.next});
 }
@@ -7293,7 +7311,7 @@ function planUndo(board){
   const now=planUndoState(board);
   while(board.history.length&&board.history.at(-1)===now)board.history.pop();
   if(!board.history.length){planRender(board);return}
-  const ui=new Map(board.projects.concat(board.tasks).map(x=>[planCardId(x),{selected:x.selected,error:x.error,result:x.result}]));
+  const ui=new Map(board.projects.concat(board.tasks).map(x=>[planCardId(x),{selected:x.selected,error:x.error,result:x.result,usedCard:x.usedCard}]));
   const step=JSON.parse(board.history.pop());
   for(const k of ['projects','tasks'])step[k]=step[k].map(x=>({...x,...(ui.get(planCardId(x))??{})}));
   Object.assign(board,step);planRender(board);
@@ -7361,9 +7379,14 @@ async function planReload(board,x){
   const kind=x.ref!=null?'project':'task',op=planOperation(x),changes=op==='update'?planChanges(x,kind):{};
   board.busy=true;agentState.busy=true;planRender(board);agentUpdateBusy();
   try{
-    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op,cardId:x.cardId}]}});
-    const fresh=planDraft(raw)[kind+'s'][0];
-    Object.assign(x,fresh,{cardId:x.cardId},kind==='project'?{ref:x.ref}:{key:x.key},{error:''});planSettleHistory(board,[x]);
+    /* A card the server already ran with other content comes back under a new id, so its edits can go. */
+    const old=x.cardId,renew=Boolean(x.usedCard);
+    const raw=await api('/api/action',{action:'work.cards.preview',data:{[kind+'s']:[{...changes,id:x.id,operation:op,...(renew?{}:{cardId:old})}]}});
+    const fresh=planDraft(raw)[kind+'s'][0],cardId=renew&&fresh.cardId?fresh.cardId:old;
+    Object.assign(x,fresh,{cardId,usedCard:false},kind==='project'?{ref:x.ref}:{key:x.key},{error:''});
+    if(cardId!==old)board.history=(board.history||[]).map(h=>{const step=JSON.parse(h);
+      for(const k of ['projects','tasks'])step[k]=step[k].map(c=>c.cardId===old?{...c,cardId}:c);return JSON.stringify(step)});
+    planSettleHistory(board,[x]);
   }catch(e){x.error=e?.message||tr('读取失败')}
   finally{board.busy=false;agentState.busy=false;planRender(board);agentUpdateBusy()}
 }
@@ -7503,7 +7526,7 @@ async function planSubmit(board,items=null){
   if(board.conversationId!==undefined&&(board!==agentState.planBoard||board.conversationId!==agentState.conversationId))return;
   const candidates=planOpenCards(board).filter(x=>items===null||items.includes(x));if(!candidates.length)return;
   board.busy=true;agentState.busy=true;agentState.stop=false;agentState.paused=false;agentUpdateBusy();planRender(board);
-  const results={create:0,update:0,delete:0,approval:0,failed:0};
+  const results={create:0,update:0,delete:0,approval:0,failed:0,used:0};
   const submit=async(x,kind)=>{
     if(!await agentWaitForResume())return;
     const op=planOperation(x),path=kind==='project'?(op==='create'?{mode:projectMode()}:planMutationPath(x,kind)):planTaskPath(board,x);
@@ -7522,7 +7545,13 @@ async function planSubmit(board,items=null){
         board.tasks.forEach(t=>{if(t.project==='ref:'+x.ref)t.project='id:'+r.id})}
       await planRetire(board,x,'done',pending?tr('已提交申请'):op==='create'?tr('已创建'):op==='update'?tr('已修改'):tr('已删除'));
       planSettleHistory(board);
-    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
+    }catch(e){x.state='draft';x.error=e?.message||tr('提交失败');results.failed++;
+      /* The server already ran this card with other content: those edits were not sent. */
+      const used=e?.status===409&&/已执行/.test(String(e.raw??e.message??''));
+      if(used&&path.mode==='approval')x.error=tr('这张卡片的申请已经提交过，等审批结果即可');else if(used)x.usedCard=true;
+      if(board.conversationId&&board.draftId){try{const recovered=await api('/api/action',{action:'agent.draft.get',data:{draftId:board.draftId,cardIds:board.projects.concat(board.tasks).map(t=>t.cardId)}});planApplyReceipts(board,recovered.receipts);planSettleHistory(board);
+        if(x.state==='done'&&used&&path.mode==='approval'){results.failed--;results.approval++}
+        else if(x.state==='done'&&used){x.result=tr('此前已执行；这次的修改没有提交');results.failed--;results.used++}else if(x.state==='done'){results.failed--;results[op]++}}catch(_){}}}
     planRender(board);
   };
   try{
@@ -7532,7 +7561,7 @@ async function planSubmit(board,items=null){
     for(const p of board.projects.filter(p=>candidates.includes(p)&&planPending(p)&&planOperation(p)==='delete'))await submit(p,'project');
     try{await refresh()}catch(_){}
   }finally{board.busy=false;agentState.busy=false;agentUpdateBusy()}
-  const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
+  const parts=[results.create?tr('创建了 {0} 项',results.create):'',results.update?tr('修改了 {0} 项',results.update):'',results.delete?tr('删除了 {0} 项',results.delete):'',results.approval?tr('提交了 {0} 个申请',results.approval):'',results.used?tr('{0} 张卡片此前已执行，这次的修改没有提交',results.used):'',results.failed?tr('{0} 张卡片未接受，原因留在卡片上',results.failed):''].filter(Boolean);
   board.closedNote=parts.join(tr('，'));
   planRender(board);agentAppend('assistant',`${board.closedNote||tr('没有提交新的改动')}${tr('。')}`);
 }
@@ -8239,7 +8268,10 @@ function scanVoiceFields(){
       const label=input.labels[0].textContent.trim();if(label)input.setAttribute('aria-label',label);
     }
     const wrapper=document.createElement('span');wrapper.className='voice-field';
+    /* Moving a field into its wrapper blurs it; one being typed in keeps its focus and caret. */
+    const typing=document.activeElement===input,from=input.selectionStart,to=input.selectionEnd;
     input.before(wrapper);wrapper.append(input);
+    if(typing){input.focus({preventScroll:true});input.setSelectionRange?.(from,to)}
     const button=document.createElement('button');button.type='button';button.className='field-voice-btn';
     button.innerHTML=icon('mic');button.onclick=()=>toggleFieldVoice(input);wrapper.append(button);
     if(input.closest('.form-field'))addFieldExpand(wrapper,input);

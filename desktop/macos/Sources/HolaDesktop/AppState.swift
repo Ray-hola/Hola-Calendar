@@ -55,10 +55,10 @@ import ServiceManagement
     private var choice = 0
     /// Bumped when a 连接 is cancelled too; only an address check waits on it.
     private var connectChoice = 0
-    /// Servers dropped with 移除 while a sign-in to them may still be on its way.
-    private var forgotten: Set<String> = []
-    /// Bumped by every sign-in and sign-out, so only the newest sign-in can still count late.
+    /// Numbers each sign-in, sign-out and 移除; `latest` keeps the newest one per server,
+    /// so a late sign-in counts only if nothing newer happened to that server.
     private var attempt = 0
+    private var latest: [String: Int] = [:]
 
     /// Idle poll interval. The server's own scheduler runs every 30 s, so
     /// nothing is gained by asking more often than this.
@@ -136,7 +136,6 @@ import ServiceManagement
 
     private func use(_ next: ConnectedServer) {
         choice += 1; connectChoice += 1
-        forgotten.remove(next.url.absoluteString)
         leaveServer()
         server = next; showConnect = false; serverText = ""
         if let saved = servers.first(where: { $0.url == next.url.absoluteString }) { username = saved.username }
@@ -162,7 +161,7 @@ import ServiceManagement
 
     /// Drops a remembered server and its kept session.
     func forget(_ saved: SavedServer) {
-        forgotten.insert(saved.url)
+        attempt += 1; latest[saved.url] = attempt
         if saved.url == server?.url.absoluteString { choice += 1; signOut(); server = nil }
         else if let t = Keychain.load(account: saved.url), let url = HolaAPI.normalize(saved.url) {
             // Its session is closed on the server too, not only forgotten here.
@@ -189,8 +188,10 @@ import ServiceManagement
         guard !username.isEmpty, !password.isEmpty else { notice = "请输入账户和密码"; return }
         let client = HolaAPI(baseURL: url), asked = choice, account = username
         let name = server?.info?.name ?? serverName
+        let key = url.absoluteString
         attempt += 1
         let mine = attempt
+        latest[key] = mine
         syncing = true
         var token: String?, failure: String?
         do {
@@ -200,15 +201,15 @@ import ServiceManagement
         } catch {
             failure = error.localizedDescription
         }
-        let key = url.absoluteString
-        // The same server picked again meanwhile, with no newer sign-in or sign-out since: this one still counts.
-        let again = choice != asked && key == server?.url.absoluteString && !signedIn && attempt == mine && !forgotten.contains(key)
+        let newest = latest[key] == mine
+        // The same server picked again meanwhile, with no newer sign-in, sign-out or 移除 for it: this one still counts.
+        let again = choice != asked && key == server?.url.absoluteString && !signedIn && newest
         guard choice == asked || again else {
             guard let t = token else { return }
             // Another server was picked: keep this session for when it is picked again.
-            // It is closed instead if this server was 移除'd, or is current and signed in or out another way.
+            // It is closed instead if something newer happened to this server, or it is current and signed in another way.
             let kept = Keychain.load(account: key)
-            if forgotten.contains(key) || key == server?.url.absoluteString || (try? Keychain.save(token: t, account: key)) == nil {
+            if !newest || key == server?.url.absoluteString || (try? Keychain.save(token: t, account: key)) == nil {
                 Concurrency.Task { try? await client.logout(token: t) }
             } else {
                 // A session kept from an earlier late sign-in is replaced, so it is closed too.
@@ -237,8 +238,8 @@ import ServiceManagement
     }
 
     func signOut() {
-        attempt += 1
         let old = (api, token)
+        if let left = (old.0?.baseURL ?? server?.url)?.absoluteString { attempt += 1; latest[left] = attempt }
         stopPolling()
         if let url = old.0?.baseURL { Keychain.delete(account: url.absoluteString) }
         token = nil; api = nil; signedIn = false; snapshot = nil; tasks = []; lastSync = nil; offline = false
