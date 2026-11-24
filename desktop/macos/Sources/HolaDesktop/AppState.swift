@@ -53,6 +53,10 @@ import ServiceManagement
     /// Bumped whenever the person picks or leaves a server, so an answer that
     /// arrives afterwards for the old choice is dropped.
     private var choice = 0
+    /// Bumped when a 连接 is cancelled too; only an address check waits on it.
+    private var connectChoice = 0
+    /// Servers dropped with 移除 while a sign-in to them may still be on its way.
+    private var forgotten: Set<String> = []
 
     /// Idle poll interval. The server's own scheduler runs every 30 s, so
     /// nothing is gained by asking more often than this.
@@ -110,14 +114,14 @@ import ServiceManagement
         guard !connecting else { return }
         connecting = true; notice = nil
         defer { connecting = false }
-        let asked = choice
+        let asked = connectChoice
         do {
             let (api, info) = try await HolaAPI.connect(serverText)
             // Cancelled, or another server picked, while the address was being checked.
-            guard choice == asked else { return }
+            guard connectChoice == asked else { return }
             use(ConnectedServer(url: api.baseURL, info: info))
         } catch {
-            guard choice == asked else { return }
+            guard connectChoice == asked else { return }
             notice = error.localizedDescription
         }
     }
@@ -129,7 +133,8 @@ import ServiceManagement
     }
 
     private func use(_ next: ConnectedServer) {
-        choice += 1
+        choice += 1; connectChoice += 1
+        forgotten.remove(next.url.absoluteString)
         leaveServer()
         server = next; showConnect = false; serverText = ""
         if let saved = servers.first(where: { $0.url == next.url.absoluteString }) { username = saved.username }
@@ -144,7 +149,7 @@ import ServiceManagement
     }
 
     func showConnectScreen() { showConnect = true; serverText = ""; notice = nil }
-    func cancelConnect() { if server != nil { choice += 1; showConnect = false; notice = nil } }
+    func cancelConnect() { if server != nil { connectChoice += 1; showConnect = false; notice = nil } }
 
     /// A `hola://connect` link only fills in the address: the person checks it and presses 连接.
     func openConnectLink(_ url: URL) {
@@ -155,7 +160,8 @@ import ServiceManagement
 
     /// Drops a remembered server and its kept session.
     func forget(_ saved: SavedServer) {
-        if saved.url == server?.url.absoluteString { choice += 1; signOut(); server = nil }
+        forgotten.insert(saved.url)
+        if saved.url == server?.url.absoluteString { choice += 1; connectChoice += 1; signOut(); server = nil }
         else if let t = Keychain.load(account: saved.url), let url = HolaAPI.normalize(saved.url) {
             // Its session is closed on the server too, not only forgotten here.
             Concurrency.Task { try? await HolaAPI(baseURL: url).logout(token: t) }
@@ -167,7 +173,10 @@ import ServiceManagement
     /// Remembers `saved` first; a server pushed off the end of the list loses its kept session.
     private func remember(_ saved: SavedServer) {
         let next = ServerList.remember(saved, in: servers)
-        for gone in servers where !next.contains(where: { $0.url == gone.url }) { Keychain.delete(account: gone.url) }
+        // The current server keeps its session even if a late sign-in pushed it off the list.
+        for gone in servers where !next.contains(where: { $0.url == gone.url }) && gone.url != server?.url.absoluteString {
+            Keychain.delete(account: gone.url)
+        }
         servers = next
     }
 
@@ -188,9 +197,16 @@ import ServiceManagement
         } catch {
             failure = "无法保存登录状态：\(error.localizedDescription)"
         }
-        // Another server was picked while signing in: keep this session for when it is picked again.
+        // Another server was picked while signing in: keep this session for when it is picked again,
+        // unless this one was 移除'd meanwhile, in which case the session is closed again.
         guard choice == asked else {
-            if token != nil { remember(SavedServer(url: url.absoluteString, name: name, username: account)) }
+            guard let t = token else { return }
+            if forgotten.contains(url.absoluteString) {
+                Keychain.delete(account: url.absoluteString)
+                Concurrency.Task { try? await client.logout(token: t) }
+            } else {
+                remember(SavedServer(url: url.absoluteString, name: name, username: account))
+            }
             return
         }
         syncing = false
