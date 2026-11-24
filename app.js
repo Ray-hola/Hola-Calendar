@@ -944,7 +944,8 @@ function canDeleteTask(t){
 function openDrawer(id){
   const alias=S.tasks.find(x=>x.id===id);if(alias&&isSuperseded(alias)&&alias.supersededBy&&(['todo','doing'].includes(alias.status)||alias.stackCompletedBy)){const target=S.tasks.find(x=>x.id===alias.supersededBy);if(target&&target.id!==id)return openDrawer(target.id)}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;
-  if($('#taskDrawer').classList.contains('hidden'))UI.drawerReturnFocus=document.activeElement;
+  const opening=$('#taskDrawer').classList.contains('hidden');
+  if(opening)UI.drawerReturnFocus=document.activeElement;
   clearFresh(taskLineageIds(t));
   const [c,l]=status(t),p=S.projects.find(p=>p.id===t.projectId),archived=['done','deferred','skipped'].includes(t.status),pendingApproval=['pending_approval','awaiting_approval','submitted'].includes(t.status),rejected=['rejected','returned'].includes(t.status),lineageIds=taskLineageIds(t);
   const manage=canManageProject(p)&&p.status==='active'&&!archived&&!pendingApproval&&!rejected,perform=!S.user.admin&&!archived&&t.assignee===S.user.id;
@@ -994,7 +995,7 @@ function openDrawer(id){
     +`${canDelete?tr('<button class="secondary-btn danger-btn" id="deleteTask">删除此任务</button>'):''}<div class="history">`
     +`<h3>${tr('任务记录')}</h3>${taskHistoryHTML(t,lineageIds)}</div>${actionCopy}`
     +`${completionActions}${editReviewActions}`;
-  $('#taskDrawer').classList.remove('hidden');$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr('确认删除「{0}」？删除后将从日历移除，之前的递延记录一并删除。',t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
+  $('#taskDrawer').classList.remove('hidden');prepareDialog($('#taskDrawer .task-drawer'),$('#drawerContent'),'drawerTitle');if(opening)focusDialog($('#taskDrawer .task-drawer'),null);$('#startTask')?.addEventListener('click',()=>act('task.start',{id:t.id}).then(()=>closeDrawer()).catch(()=>{}));$('#completeTask')?.addEventListener('click',()=>complete(t));$('#deferTask')?.addEventListener('click',()=>defer(t));$('#requestTaskEdit')?.addEventListener('click',()=>editTaskRequest(id));$('#directTaskEdit')?.addEventListener('click',()=>editTaskRequest(id,true));$('#adjustTaskAssignment')?.addEventListener('click',()=>editTaskAssignment(id));$('#deleteTask')?.addEventListener('click',async()=>{if(!confirm(tr('确认删除「{0}」？删除后将从日历移除，之前的递延记录一并删除。',t.name)))return;try{await act('task.delete',{id:t.id});closeDrawer()}catch(e){}});$('#editCompletion')?.addEventListener('click',()=>editCompletion(t));$('#reopenTask')?.addEventListener('click',()=>reopenTask(t));$('#approveEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,true));$('#rejectEditRequest')?.addEventListener('click',()=>reviewTaskEdit(t.id,false));
 }
 function taskEditRequest(t){
   if(!t)return null;
@@ -3646,6 +3647,55 @@ async function act(action,data,{quiet=false}={}){try{await api('/api/action',{ac
 function restorePanelFocus(target){
   if(target?.isConnected&&!target.closest('.hidden'))target.focus?.({preventScroll:true});
 }
+const DIALOG_FOCUSABLES=['button:not([disabled])','[href]','input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])','textarea:not([disabled])','[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]:not([tabindex="-1"])'].join(',');
+function dialogControls(root){
+  return Array.from(root?.querySelectorAll?.(DIALOG_FOCUSABLES)||[]).filter(el=>{
+    const rects=el.getClientRects?.();
+    if(el.closest?.('.hidden,[inert]')||rects&&!rects.length)return false;
+    return typeof getComputedStyle!=='function'||getComputedStyle(el).visibility!=='hidden';
+  });
+}
+/* A modal owns the keyboard while it is open: name it from its visible heading,
+   move focus into its content and keep Tab from walking through the obscured page. */
+function prepareDialog(dialog,content,fallbackTitleId){
+  const title=content?.querySelector?.('h1,h2,h3');
+  if(title){if(!title.id)title.id=fallbackTitleId;dialog?.setAttribute?.('aria-labelledby',title.id)}
+  else dialog?.removeAttribute?.('aria-labelledby');
+  dialog?.setAttribute?.('tabindex','-1');
+}
+function focusDialog(dialog,content){
+  // Editable text is reachable with Tab but not focused on opening: an 档案 still typing itself out would eat keys.
+  const contentControls=dialogControls(content),target=contentControls.find(el=>el.hasAttribute?.('autofocus'))
+    ||contentControls.find(el=>!el.isContentEditable)||contentControls[0]||dialogControls(dialog)[0]||dialog;
+  target?.focus?.({preventScroll:true});
+}
+function topOpenDialog(){
+  const modal=$('#modalBackdrop .modal'),drawer=$('#taskDrawer .task-drawer');
+  if(modal&&!$('#modalBackdrop')?.classList.contains('hidden'))return modal;
+  if(drawer&&!$('#taskDrawer')?.classList.contains('hidden'))return drawer;
+  return null;
+}
+function dialogKeydown(e){
+  if(e.key!=='Tab'||e.defaultPrevented)return;
+  const dialog=topOpenDialog();if(!dialog)return;
+  // The assistant panel floats beside dialogs and keeps its own Tab order; at its ends Tab returns to the dialog.
+  const panel=e.target?.closest?.('#agentPanel');
+  if(panel){
+    const own=dialogControls(panel),inDialog=dialogControls(dialog);
+    if(!own.length||!inDialog.length)return;
+    if(!e.shiftKey&&e.target===own[own.length-1]){e.preventDefault();inDialog[0].focus()}
+    else if(e.shiftKey&&e.target===own[0]){e.preventDefault();inDialog[inDialog.length-1].focus()}
+    return;
+  }
+  const controls=dialogControls(dialog),active=document.activeElement;
+  if(!controls.length){e.preventDefault();dialog.focus?.({preventScroll:true});return}
+  // Focus on the dialog itself (after a click on its blank area) counts as outside its controls.
+  const first=controls[0],last=controls[controls.length-1],outside=active===dialog||!dialog.contains?.(active);
+  if(e.shiftKey&&(outside||active===first)){e.preventDefault();last.focus()}
+  else if(!e.shiftKey&&(outside||active===last)){e.preventDefault();first.focus()}
+}
 function openModal(html){flushFormDraft();cancelMeetingOpen();meetingStopLive().catch(e=>toast(e.message));
   if($('#modalBackdrop')?.classList.contains('hidden'))UI.modalReturnFocus=document.activeElement;UI.docDirty=false;
   if(UI.briefSource){UI.briefSource.closest('.archive-file')?.classList.remove('is-out');UI.briefSource=null}
@@ -3654,7 +3704,8 @@ function openModal(html){flushFormDraft();cancelMeetingOpen();meetingStopLive().
   ['#modalBackdrop','#modalBackdrop .modal','#modalContent'].forEach(s=>$(s)?.getAnimations?.().forEach(a=>a.cancel()));
   $('#modalContent').innerHTML=html;tempoTypewriter($('#modalContent h2'));
   if($('#modalContent').dataset)delete $('#modalContent').dataset.meetingId;
-  $('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop')?.classList.remove('hidden')};
+  $('#modalBackdrop .modal')?.classList?.remove('is-wide','is-flown');$('#modalBackdrop')?.classList.remove('hidden');
+  prepareDialog($('#modalBackdrop .modal'),$('#modalContent'),'modalTitle');focusDialog($('#modalBackdrop .modal'),$('#modalContent'))};
 function closeModal(){if(UI.docDirty&&!confirm(tr('修改还没保存，确定关闭？')))return;flushFormDraft(true);cancelMeetingOpen();
   meetingStopLive().catch(e=>toast(e.message));UI.docDirty=false;if(typeof foldBrief==='function'&&foldBrief())return;
   $('#modalBackdrop')?.classList.add('hidden');restorePanelFocus(UI.modalReturnFocus)};
@@ -4193,7 +4244,7 @@ function newTask(projectId,initialDate){
   openModal([
     `<h2 id="taskDialogTitle">${tr('新任务')}</h2>${kinds}<label class="form-field" id="taskProjectField">${tr('所属项目')}`,
     `<select id="taskProject" ${locked?'disabled':''}>${projectOptions}</select></label>`,
-    `<label class="form-field">${tr('任务名称')}<input id="taskName" maxlength="120"></label>`,
+    `<label class="form-field">${tr('任务名称')}<input id="taskName" maxlength="120" autofocus></label>`,
     `<label class="form-field">${tr('任务描述')}<textarea id="taskDesc"></textarea></label>`,
     `<label class="form-field" id="taskAssigneeField">${tr('指派给')}<select id="taskAssignee"></select>`,
     '<div id="taskAssigneeLoad" class="assignee-load-hint"></div></label><div class="task-form-grid">',
@@ -5821,6 +5872,7 @@ function shortcutKey(e){
     t:openToday,h:()=>switchView('guide'),w:()=>switchView('calendar'),p:()=>switchView('projects'),i:()=>switchView('inbox')}[key];
   if(run){e.preventDefault();run()}
 }
+document.addEventListener('keydown',dialogKeydown);
 document.addEventListener('keydown',shortcutKey);
 $('#shortcutHelp').onclick=openShortcuts;
 
