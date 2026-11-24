@@ -78,7 +78,8 @@ jobs:
         run: |
           $ver = ([xml](Get-Content desktop\windows\Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item desktop\windows\build\哗啦待办-windows.zip "dist\Hola-Desktop-Windows-$ver.zip"
+          # The step script is not read as UTF-8 here, so the Chinese file name is matched, not written out.
+          Copy-Item (Get-ChildItem desktop\windows\build\*-windows.zip).FullName "dist\Hola-Desktop-Windows-$ver.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
