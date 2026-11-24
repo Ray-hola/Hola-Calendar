@@ -14,6 +14,8 @@ foreach ($v in 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_pr
 $Port = if ($env:PORT) { $env:PORT } else { '48173' }
 $Work = Join-Path ([IO.Path]::GetTempPath()) ('hola-it-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $Work | Out-Null
+# server.py prints Chinese; with its output going to a file Python would otherwise pick the ANSI code page.
+$env:PYTHONUTF8 = '1'
 $python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
 $server = Start-Process $python -ArgumentList "`"$Repo\server.py`" --port $Port --db `"$Work\db.sqlite3`"" -PassThru -WindowStyle Hidden `
   -RedirectStandardOutput "$Work\server.log" -RedirectStandardError "$Work\server.err"
