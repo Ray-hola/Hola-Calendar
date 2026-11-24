@@ -1639,6 +1639,29 @@ test('work-log and 成果库 detail opens the live task, the live project, or an
   assert.equal(a.json('toasts').length,1,'找不到的项目给出提示而不是报错');
 });
 
+test('a 成果库 project shows each task with ✅, its links and what the person said (#124)',()=>{
+  const a=app(),elements={};
+  a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
+  a.run(`var modal='';openModal=h=>{modal=h};
+    S.user={id:'superadmin',admin:1};S.users=[{id:'wang00',displayName:'王零'},{id:'li01',displayName:'李一'},{id:'zhao02',displayName:'<b>赵</b>'}];
+    S.projects=[];S.fileArchives=[];
+    S.achievements=[{id:'old',name:'已交付项目',status:'done',completedAt:'2026-11-01',tasks:[
+      {id:'a',name:'任务A',assignee:'wang00',status:'done',completionSummary:'方案见 https://docs.example.com/a，评审通过。',completionFeeling:'顺利'},
+      {id:'b',name:'任务B',assignee:'li01',completedBy:'li01',status:'done',completionSummary:'https://git.example.com/pr/9 https://git.example.com/pr/9',completionFeeling:'困难'},
+      {id:'c',name:'任务C',assignee:'zhao02',status:'done',completionSummary:'<img src=x onerror=alert(1)>'},
+      {id:'d',name:'任务D',assignee:'wang00',status:'deferred',completionSummary:'https://not.shown.example.com'}]}];
+    openWorkLogDetail('','old','project')`);
+  const modal=a.run('modal'),items=modal.split('<li').slice(1);
+  assert.equal(items.length,4);
+  assert.match(items[0],/任务A<\/b><span>王零 · 已完成 ✅<\/span><a href="https:\/\/docs\.example\.com\/a" target="_blank" rel="noopener noreferrer">🔗 docs\.example\.com<\/a>/);
+  assert.match(items[0],/<p>王零觉得很顺利：方案见，评审通过。<\/p>/);
+  assert.equal(items[1].match(/<a /g).length,1,'the same link shows once');
+  assert.match(items[1],/<p>李一觉得有些困难<\/p>/);
+  assert.ok(!modal.includes('<img'),'a summary is text, not markup');
+  assert.match(items[2],/&lt;b&gt;赵&lt;\/b&gt;说：&lt;img/);
+  assert.ok(!items[3].includes('✅')&&!items[3].includes('not.shown'),'an unfinished task gets no ✅ and no links');
+});
+
 test('project invites show the owner display name',()=>{
   const a=app(),elements={};
   a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};
