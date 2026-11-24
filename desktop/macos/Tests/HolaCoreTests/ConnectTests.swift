@@ -23,10 +23,12 @@ func connectTests() async {
     }
 
     await test("private addresses are told apart from public ones") {
-        for h in ["localhost", "127.0.0.1", "10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.0.10", "169.254.1.1", "nas", "mac.local", "::1", "fe80::1", "fd12::1"] {
+        for h in ["localhost", "127.0.0.1", "10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.0.10", "169.254.1.1", "nas", "mac.local", "::1", "fe80::1", "fd12::1",
+                  "fc00::1", "feb0::1", "100.64.0.1", "100.127.255.1", "::ffff:192.168.1.8", "[fd12::1]"] {
             check(ServerAddress.isPrivate(h), "\(h) should be private")
         }
-        for h in ["work.ovenray.cn", "8.8.8.8", "172.32.0.1", "192.169.0.1", "2001:db8::1", "1.2.3"] {
+        for h in ["work.ovenray.cn", "8.8.8.8", "172.32.0.1", "192.169.0.1", "2001:db8::1", "1.2.3",
+                  "100.128.0.1", "fec0::1", "3232235777", "::ffff:8.8.8.8"] {
             check(!ServerAddress.isPrivate(h), "\(h) should be public")
         }
         check(ServerAddress.exposesPassword(URL(string: "http://work.example.com")!))

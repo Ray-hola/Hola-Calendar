@@ -19,6 +19,8 @@ import HolaCore
     private var touchBar: TouchBarController!
     private var island: IslandController!
     private var bag: Set<AnyCancellable> = []
+    /// A `hola://` link that arrived before launch finished (a cold start opens it first).
+    private var pendingConnect: URL?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = AppState()
@@ -47,6 +49,11 @@ import HolaCore
 
         state.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.renderStatusItem() }.store(in: &bag)
         renderStatusItem()
+        if let server = pendingConnect {
+            pendingConnect = nil
+            state.openConnectLink(server)
+            showPopover()
+        }
     }
 
     /// The menu-bar item carries the countdown while a session runs.
@@ -76,6 +83,7 @@ import HolaCore
     /// is filled in on the 连接 screen and the popover opens for the person to confirm.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let server = urls.lazy.compactMap(ConnectLink.server(from:)).first else { return }
+        guard state != nil else { pendingConnect = server; return }
         state.openConnectLink(server)
         showPopover()
     }

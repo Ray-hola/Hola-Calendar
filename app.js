@@ -3595,7 +3595,8 @@ function connectDesktopApp(){
     +`<button class="secondary-btn" id="copyDesktopServer">${tr('复制地址')}</button>`
     +`<a class="primary-btn" id="openDesktopApp" href="${escapeHTML(desktopConnectLink(origin))}">${tr('在桌面 App 中打开')}</a></div>`);
   $('#desktopServer').onfocus=e=>e.target.select();
-  $('#copyDesktopServer').onclick=()=>navigator.clipboard.writeText(origin).then(()=>toast(tr('地址已复制')),()=>{$('#desktopServer').select();toast(tr('请手动复制地址'))});
+  // navigator.clipboard is missing on plain-http LAN addresses, so that case falls back too.
+  $('#copyDesktopServer').onclick=()=>(navigator.clipboard?.writeText?navigator.clipboard.writeText(origin):Promise.reject()).then(()=>toast(tr('地址已复制')),()=>{$('#desktopServer').select();toast(tr('请手动复制地址'))});
 }
 /* Passwords are typed into masked boxes, the new one twice: a slip nobody
    could see would otherwise only show at the next sign-in. */

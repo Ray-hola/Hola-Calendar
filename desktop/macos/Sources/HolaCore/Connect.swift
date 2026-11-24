@@ -30,17 +30,27 @@ public enum ServerAddress {
     /// Loopback, private IPv4 ranges, link-local, `.local` names and bare
     /// machine names: places a password over http stays inside the network.
     public static func isPrivate(_ host: String) -> Bool {
-        let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if h == "localhost" || h.hasSuffix(".local") || h == "::1" || h.hasPrefix("fe80:") || h.hasPrefix("fd") && h.contains(":") { return true }
-        let parts = h.split(separator: ".").compactMap { Int($0) }
-        if parts.count == 4, h.split(separator: ".").count == 4 {
+        var h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if h.hasPrefix("::ffff:") && h.contains(".") { h = String(h.dropFirst(7)) }   // IPv4 written as IPv6
+        if h == "localhost" || h.hasSuffix(".localhost") || h.hasSuffix(".local") { return true }
+        if h.contains(":") {
+            // IPv6: loopback, unique local fc00::/7, link-local fe80::/10.
+            if h == "::1" { return true }
+            guard let first = h.split(separator: ":").first, let word = UInt16(first, radix: 16) else { return false }
+            return word & 0xfe00 == 0xfc00 || word & 0xffc0 == 0xfe80
+        }
+        let labels = h.split(separator: ".", omittingEmptySubsequences: false)
+        let parts = labels.compactMap { Int($0) }
+        if labels.count == 4, parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) {
             switch (parts[0], parts[1]) {
             case (10, _), (127, _), (192, 168), (169, 254): return true
             case (172, let b) where (16...31).contains(b): return true
+            case (100, let b) where (64...127).contains(b): return true   // CGNAT, used by Tailscale
             default: return false
             }
         }
-        return !h.contains(".") && !h.contains(":")
+        // A bare machine name is on this network; a bare number is an IPv4 address in disguise.
+        return labels.count == 1 && !h.isEmpty && Int(h) == nil
     }
 
     /// A password sent here could be read on the way: plain http to a public host.
