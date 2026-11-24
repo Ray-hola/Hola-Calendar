@@ -5237,6 +5237,37 @@ const memberShelfCard=p=>`<article class="achievement-card" data-project="${esca
   +`<span>${tr('完成于')} · <b>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</b></span></div>`
   +`<div class="achievement-actions"><button class="ghost-btn achievement-files" data-project="${escapeHTML(p.id)}">${tr('项目文件')}</button>`
   +`<button class="ghost-btn open-channel-archive" data-project="${escapeHTML(p.id)}" data-name="${escapeHTML(p.name)}">${tr('沟通记录')}</button></div></article>`;
+/* One finished task in a 成果库 project: ✅, the links its completion summary
+   gave, and what the person who did it said about it. */
+const ACHIEVEMENT_LINK=/https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]+/g;
+/* A link ends before trailing punctuation and before a ) it did not open; what was cut stays in the sentence. */
+function achievementLinkSplit(raw){
+  let url=raw,prev;
+  do{
+    prev=url;url=url.replace(/[.,;:!?]+$/,'');
+    let extra=(url.match(/\)/g)||[]).length-(url.match(/\(/g)||[]).length;
+    while(extra>0&&url.endsWith(')')){url=url.slice(0,-1);extra--}
+  }while(url!==prev);
+  return [url,raw.slice(url.length)];
+}
+/* The host the browser will really open, not what sits before an @. */
+const achievementHost=u=>{try{return typeof URL==='function'?new URL(u).host:(u.match(/^https?:\/\/(?:[^/?#@]*@)?([^/?#@]+)/)||[])[1]||''}catch{return ''}};
+const ACHIEVEMENT_SAID={'顺利':'{0}觉得很顺利','一般':'{0}认为进展一般','困难':'{0}觉得有些困难','阻塞':'{0}说遇到了阻塞'};
+function achievementTaskHTML(t){
+  const done=t.status==='done',who=t.completedBy||t.assignee,text=String(t.completionSummary||'');
+  const links=[];
+  const note=text.replace(ACHIEVEMENT_LINK,m=>m.split(/,(?=https?:\/\/)/).map(part=>{
+    const [url,tail]=achievementLinkSplit(part);if(!achievementHost(url))return part;
+    if(!links.includes(url))links.push(url);return '\u0001'+tail;
+  }).join(''))
+    /* Only where a link came out: brackets left empty, and the space before it. */
+    .replace(/[（(《【]\s*\u0001[.,;:!?。]*\s*[）)》】]/g,'').replace(/\u0001[ \t]+(?=[，。；、！？：）」》】』])/g,'\u0001').replace(/[ \t]*\u0001/g,'')
+    .replace(/[ \t]+/g,' ').replace(/\s*\n\s*/g,'\n').trim();
+  const name=who?nameOf(who):'—',said=tr(ACHIEVEMENT_SAID[t.completionFeeling]||'{0}说',name);
+  const words=done&&(note||ACHIEVEMENT_SAID[t.completionFeeling])?`<p>${escapeHTML(note?tr('{0}：{1}',said,note):said)}</p>`:'';
+  return `<li><div><b>${escapeHTML(t.name)}</b><span>${escapeHTML(name)} · ${done?`${tr('已完成')} ✅`:status(t)[1]}</span>`
+    +`${done?links.map(u=>`<a href="${escapeHTML(u)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHTML(achievementHost(u))}</a>`).join(''):''}</div>${words}</li>`;
+}
 /* Work-log rows and 成果库 cards open the live task or project while it is still
    in the snapshot. A finished project only lives in the archive payload, so it
    opens as a read-only summary instead; one known only by its archived files
@@ -5254,7 +5285,7 @@ function openWorkLogDetail(taskId,projectId,kind){
     +`<div><span>${tr('项目状态')}</span><strong>${projectStatus(p)}</strong></div><div><span>${tr('任务完成')}</span><strong>${done}/${tasks.length}</strong></div>`
     +`<div><span>${tr('完成于')}</span><strong>${escapeHTML(String(p.completedAt||p.end||'—').slice(0,10))}</strong></div></div>`
     +`${p.completionReport?`<div class="completion-summary"><span>${tr('结项报告')}</span><p>${escapeHTML(p.completionReport)}</p></div>`:''}`
-    +`${tasks.length?`<div class="detail-grid">${tasks.map(t=>`<div><span>${escapeHTML(t.name)}</span><strong>${escapeHTML(t.assignee?nameOf(t.assignee):'—')} · ${status(t)[1]}</strong></div>`).join('')}</div>`:''}`
+    +`${tasks.length?`<ul class="achievement-tasks">${tasks.map(achievementTaskHTML).join('')}</ul>`:''}`
     +`<div class="modal-footer"><button class="secondary-btn" id="closeWorkLogDetail">${tr('关闭')}</button></div>`);
   const close=$('#closeWorkLogDetail');
   close.onclick=closeModal;
