@@ -65,10 +65,12 @@ async function setLanguage(lang){
   if(S.user){try{await api('/api/action',{action:'profile.language',data:{lang}})}catch(e){toast(e.message);return}}
   try{localStorage.setItem(LANG_KEY,lang)}catch(_){}
   if(lang!==LANG){
+    try{if(UI.view==='settings')sessionStorage.setItem(RETURN_VIEW_KEY,'settings')}catch(_){}
     const url=new URL(location.href);url.searchParams.delete('lang');url.searchParams.delete('langAuto');
     if(url.href!==location.href)location.replace(url.href);else location.reload();
   }
 }
+const RETURN_VIEW_KEY='hola-return-view';
 /* The account's saved language wins over this browser's, except while ?lang= is in the address. */
 function autoLang(){try{return new URLSearchParams(location.search).has('langAuto')}catch(_){return false}}
 function syncAccountLanguage(user){
@@ -89,7 +91,7 @@ function syncAccountLanguage(user){
 }
 /* 外观: a theme (Anthropic风 / Tempo风) and one of its palettes. The team
    default lives in settings (S.appearance; admins set it in 系统设置 → 外观);
-   anyone may follow it or pick their own in the account menu, kept in this
+   anyone may follow it or pick their own in 系统设置 › 个人偏好, kept in this
    browser under APPEARANCE_KEY. Both end up as data-theme / data-palette on
    <html>, which an inline script in index.html also sets from storage before
    the stylesheet loads, so a reload never flashes the other theme. The team
@@ -598,7 +600,9 @@ function rememberAccount(id){if(!id)return;try{localStorage.setItem(KNOWN_ACCOUN
 async function refresh(){
   let next;
   try{next=await getState()}catch(e){if(e.status===401){showAuth();return}throw e}
+  let back='';
   if(S.user?.id!==next.user.id){
+    try{back=!S.user&&sessionStorage.getItem(RETURN_VIEW_KEY)||'';sessionStorage.removeItem(RETURN_VIEW_KEY)}catch(_){}
     if(S.user)resetFormDraft();
     cancelTourOffer();endTour(false);meetingCancelCapture();
     if(S.user&&typeof agentResetUser==='function')agentResetUser();
@@ -608,6 +612,7 @@ async function refresh(){
      loads, so guard the call rather than assume it is in scope. */
   if(syncAccountLanguage(next.user))return;
   S=next;lastStateAt=Date.now();restorePendingFormDrafts();if(S.dateHorizon)DATE_HORIZON=S.dateHorizon;rememberAccount(S.user.id);renderAll();
+  if(back==='settings')switchView('settings');
   if(typeof offerTour==='function')offerTour();renderPip();if(typeof loadSpeechStatus==='function')loadSpeechStatus();
   if(typeof updateChatDot==='function')updateChatDot();
 }
@@ -2866,6 +2871,7 @@ const SETTING_DEFAULTS={
    with a way back, instead of crowding the list. */
 const SETTINGS_PAGES={ai:{title:tr('AI 接入与模型'),render:()=>renderAiSettingsPage()},prompt:{title:tr('会议纪要提示词'),render:()=>renderPromptPage()}};
 function openSettingsPage(page){
+  if(!S.user?.admin)return;
   UI.settingsPageNext=SETTINGS_PAGES[page]?page:'';
   if(UI.view!=='settings'){switchView('settings');return}
   UI.settingsPage=UI.settingsPageNext;UI.settingsPageNext='';renderSettings();
@@ -2873,6 +2879,7 @@ function openSettingsPage(page){
   if(!UI.settingsPage)$(`#settingsView [data-settings-page="${page}"]`)?.focus?.();
 }
 function renderSettingsPage(){
+  if(!S.user?.admin){UI.settingsPage='';UI.settingsPageNext=''}
   const page=SETTINGS_PAGES[UI.settingsPage],box=$('#settingsPage');
   $('#settingsView .settings-layout')?.classList?.toggle('hidden',Boolean(page));box?.classList?.toggle('hidden',!page);
   const eyebrow=$('#settingsView .page-intro .eyebrow'),title=$('#settingsView .page-intro h1');
@@ -3087,6 +3094,7 @@ function renderSettings(){
   const admin=Boolean(S.user?.admin),superadmin=S.user?.role==='superadmin';
   $$('#settingsView .setting-row').forEach(row=>row.classList.toggle('is-forbidden',row.dataset.role==='self'?false:row.dataset.role==='superadmin'?!superadmin:!admin));
   renderPersonalSettings();
+  $('#settingsSearch')?.setAttribute?.('placeholder',admin?tr('搜索设置，例如：补报、规则组、每周'):tr('搜索设置，例如：语言、外观'));
   renderRepeatStackingSetting();
   renderProjectAutomationSetting();
   renderCollectionSchedule();
@@ -4820,7 +4828,8 @@ const GUIDE=[
     [tr('三种权限组'),[[tr('权限组'), tr('适合')], ["superadmin", tr('系统所有者，通常只有一位')], [tr('管理员'), tr('负责审批和项目管理，可查看账户列表')], [tr('普通用户'), tr('团队成员，按规则组新建项目和任务')]],"table"],
     [tr('注意'),[tr('删除账户仅限 superadmin，且不可撤销，需要输入账户名确认；仍负责进行中项目或有未完成任务的账户不能删除，要先转交。')],'note'],
   ]},
-  {id:'settings',title:tr('系统设置'),icon:'settings',demo:'rules',lead:tr('对全体成员生效的规则，仅管理员可见。'),parts:[
+  {id:'settings',title:tr('系统设置'),icon:'settings',demo:'rules',lead:tr('个人偏好每个人都有；其余是对全体成员生效的规则，仅管理员可见。'),parts:[
+    [tr('个人偏好'),[tr('界面语言：简体中文或 English，跟着账户走。'),tr('我的外观：跟随团队，或选自己的主题和配色，只在这个浏览器里生效。')],'list'],
     [tr('查找设置'),[tr('左侧按类别跳转，顶部搜索框可以直接搜设置项。'),tr('改过默认值的设置左侧有一条竖线，点「恢复默认」改回。')],'list'],
     [tr('成员与权限'),[tr('规则组分别设定项目和任务的创建方式（直接创建、需要审批或不允许），以及 AI 助手的使用范围（关闭、查询与规划或可代为操作）。'),tr('点「新建规则组」创建新组并选择成员；没分到任何组的成员按「默认规则」。'),tr('「账户与权限组」进入账户管理。')],'list'],
     [tr('日程'),[tr('每周从哪天开始：影响周视图、档案室的周范围和周报。'),tr('固定任务递延合并：开启后同一固定任务没做完的几期合成一张卡。')],'list'],
