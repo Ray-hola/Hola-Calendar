@@ -2350,9 +2350,9 @@ async function openMarkdownFile(p,id){
     finally{if(input.isConnected){save.textContent=tr('保存');save.disabled=input.value===saved}}
   };
 }
-async function uploadProjectFiles(p,list){
+async function uploadProjectFiles(p,list,skipped=0){
   const files=[...list];if(!files.length)return;
-  const big=files.find(f=>f.size>MAX_FILE_MB*1048576);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
+  const big=files.find(f=>f.size>MAX_FILE_MB*1000000);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
   toast(tr('正在上传 {0} 个文件…',files.length));
   try{
     for(const f of files){
@@ -2360,8 +2360,17 @@ async function uploadProjectFiles(p,list){
         headers:{'Content-Type':f.type||'application/octet-stream','X-Work-Calendar':'1','X-File-Name':encodeURIComponent(f.name)}});
       const x=await readJSON(r);if(!r.ok)throw new Error(trServer(x.error)||tr('「{0}」上传未完成',f.name));
     }
-    await refresh();toast(tr('已上传 {0} 个文件',files.length));
-  }catch(e){toast(e.message);refresh()}
+    await refreshKeepingBackground(p);toast(skipped?tr('已上传 {0} 个文件，跳过了 {1} 个文件夹',files.length,skipped):tr('已上传 {0} 个文件',files.length));
+  }catch(e){toast(e.message);refreshKeepingBackground(p).catch(()=>{})}
+}
+/* An upload re-renders the space; 项目背景 typed but not saved is put back,
+   as long as the same project is still open. */
+async function refreshKeepingBackground(p){
+  const root=$('#spaceBackgroundEditor'),save=$('#saveBackground');
+  const draft=UI.space===p.id&&root&&save?.disabled===false?docText($('#spaceBackground')):null,mode=root?.dataset?.mode;
+  await refresh();
+  const again=$('#spaceBackgroundEditor');if(draft==null||UI.space!==p.id||!again)return;
+  mdSet(again,draft);mdShow(again,mode||'edit',false);$('#spaceBackground')?.oninput?.();
 }
 /* Background and 分工 save in place without a full refresh, so typing in one
    field and moving to the next never loses the caret. */
@@ -2398,11 +2407,31 @@ function bindProjectSpace(p){
   $$('#projectSpace .meeting-row').forEach(b=>b.onclick=()=>openMeetingEditor(p,b.dataset.meeting));
   $$('#projectSpace [data-open-file]').forEach(b=>b.onclick=()=>openProjectFile(p,b.dataset.openFile));
   $$('#projectSpace .file-delete').forEach(b=>b.onclick=()=>deleteProjectFile(p,b.dataset.file,b));
-  const zone=$('#spaceFiles');if(!zone)return;
-  zone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();zone.classList.add('is-over')};
-  zone.ondragleave=e=>{if(!zone.contains(e.relatedTarget))zone.classList.remove('is-over')};
-  zone.ondrop=e=>{e.preventDefault();zone.classList.remove('is-over');uploadProjectFiles(p,e.dataTransfer.files)};
+  /* Files dragged in from another app upload wherever they land in the space,
+     on any tab; a space that cannot take uploads takes no drop either (#117). */
+  const zone=$('#projectSpace');if(!zone)return;
+  zone.classList?.toggle?.('is-over',false);
+  if(zone.dataset?.readonly==='true'){zone.ondragenter=zone.ondragover=zone.ondragleave=zone.ondrop=null;return}
+  zone.ondragenter=zone.ondragover=e=>{if(!dropIsUpload(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy';zone.classList.toggle('is-over',true)};
+  zone.ondragleave=e=>{if(!zone.contains(e.relatedTarget))zone.classList.toggle('is-over',false)};
+  zone.ondrop=e=>{
+    if(!dropIsUpload(e))return;
+    e.preventDefault();zone.classList.toggle('is-over',false);
+    const all=[...e.dataTransfer.files],entries=[...(e.dataTransfer.items||[])].filter(i=>i.kind==='file');
+    /* Without a matching entry per file, a folder shows as an empty file with no type. */
+    const isFolder=(f,i)=>entries.length===all.length?Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory):!f.size&&!f.type;
+    const files=all.filter((f,i)=>!isFolder(f,i)),skipped=all.length-files.length;
+    if(!files.length){if(skipped)toast(tr('文件夹不能直接上传，请拖入其中的文件'));return}
+    uploadProjectFiles(p,files,skipped);
+  };
 }
+const dragTypes=e=>[...(e.dataTransfer?.types||[])];
+/* An image dragged from a web page also carries its address, and stays a link drop. */
+const dropIsUpload=e=>{const t=dragTypes(e);return t.includes('Files')&&!t.includes('text/uri-list')};
+/* What the browser would open in place of the app: a file anywhere, a link outside a text field. */
+const dropWouldLeave=e=>{const t=dragTypes(e);
+  const el=e.target?.nodeType===3?e.target.parentElement:e.target;
+  return dropIsUpload(e)||t.includes('text/uri-list')&&!el?.closest?.('input:not([type=checkbox],[type=radio],[type=button],[type=submit],[type=range],[type=file]),textarea,[contenteditable]:not([contenteditable="false"])')};
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
   const end=S.projects.find(p=>p.id===t.projectId)?.end,beyond=Boolean(end&&t.date>end);
@@ -5901,6 +5930,9 @@ document.addEventListener('click',e=>{
   toggleAccountMenu(false);
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleAccountMenu(false)});
+/* A file dropped where nothing takes it is not opened in place of the app. */
+document.addEventListener('dragover',e=>{if(!e.defaultPrevented&&dropWouldLeave(e)){e.preventDefault();e.dataTransfer.dropEffect='none'}});
+document.addEventListener('drop',e=>{if(!e.defaultPrevented&&dropWouldLeave(e))e.preventDefault()});
 document.addEventListener('keydown',e=>{
   if(UI.view!=='archive'||e.altKey||e.ctrlKey||e.metaKey||!$('#modalBackdrop').classList.contains('hidden'))return;
   if(e.target.closest('input,textarea,select,[contenteditable],.archive-ruler'))return;

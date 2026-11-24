@@ -1576,6 +1576,47 @@ test('a background save receipt preserves newer edits and allows retry after a f
   assert.equal(a.run('project.background'),'版本 B');
 });
 
+test('files dragged in from another app upload anywhere in the project space, folders and archives aside (#117)',()=>{
+  const a=app(),elements={};
+  const node=()=>({dataset:{},classList:{on:new Set(),toggle(c,v){v?this.on.add(c):this.on.delete(c)}},contains:()=>false});
+  a.context.document={querySelector:s=>elements[s]||(elements[s]=node()),querySelectorAll:()=>[]};
+  a.run(`var uploads=[],toasts=[];uploadProjectFiles=(p,files,skipped)=>uploads.push([p.id,files.map(f=>f.name),skipped]);toast=m=>toasts.push(m);
+    S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.files=[];S.tasks=[];
+    S.projects=[{id:'live',name:'进行中',owner:'test001',status:'active',members:{test001:'accepted'}}];
+    S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
+    UI.space='live';renderProjects();`);
+  const space=elements['#projectSpace'],event=(types,extra={})=>({dataTransfer:{types,dropEffect:'',files:[],items:[],...extra},prevented:false,preventDefault(){this.prevented=true}});
+  const inside=event(['text/plain']);space.ondragover(inside);
+  assert.equal(inside.prevented,false,'moving a task row inside the app is not an upload');
+  const over=event(['Files']);space.ondragover(over);
+  assert.ok(over.prevented&&over.dataTransfer.dropEffect==='copy'&&space.classList.on.has('is-over'));
+  const dir={kind:'file',webkitGetAsEntry:()=>({isDirectory:true})},file={kind:'file',webkitGetAsEntry:()=>({isDirectory:false})};
+  const web=event(['Files','text/uri-list','text/html']);space.ondragover(web);
+  assert.equal(web.prevented,false,'an image dragged from a web page stays a link drop');
+  space.ondrop(event(['Files'],{files:[{name:'方案.pdf',size:9,type:'application/pdf'},{name:'素材',size:0,type:''}],items:[file,dir]}));
+  assert.ok(!space.classList.on.has('is-over'));
+  assert.deepEqual(a.json('uploads'),[['live',['方案.pdf'],1]],'the skipped folder is counted in the upload message');
+  space.ondrop(event(['Files'],{files:[{name:'资料',size:0,type:''}],items:[]}));
+  assert.equal(a.json('uploads').length,1,'without entries a folder is still told apart');
+  assert.equal(a.json('toasts').length,1,'a folder-only drop says why nothing uploaded');
+  a.run(`UI.space='old';renderProjects();`);
+  assert.equal(space.ondrop,null,'an archive takes no drop');
+  const field={closest:s=>(s.includes('textarea')?{}:null)},page={closest:()=>null};
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files']},target:field}),true,'a file never replaces the app');
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files','text/uri-list']},target:page}),true,'nor does a web image dropped on the page');
+  assert.equal(a.run('dropWouldLeave')({dataTransfer:{types:['Files','text/uri-list']},target:field}),false,'a link dropped in a text field is typed in');
+});
+
+test('an upload puts unsaved 项目背景 back, only into the same project (#117)',async()=>{
+  const a=app(),els={'#spaceBackgroundEditor':{dataset:{mode:'preview'}},'#saveBackground':{disabled:false},'#spaceBackground':{tagName:'TEXTAREA',value:'没保存的背景'}};
+  a.context.document={querySelector:s=>els[s]||null,querySelectorAll:()=>[]};
+  a.run(`var put=[];mdSet=(r,v)=>put.push(v);mdShow=(r,m)=>put.push(m);UI.space='A';`);
+  a.run(`refresh=async()=>{}`);await a.run(`refreshKeepingBackground({id:'A'})`);
+  assert.deepEqual(a.json('put'),['没保存的背景','preview'],'the draft and its mode come back');
+  a.run(`put=[];refresh=async()=>{UI.space='B'}`);await a.run(`refreshKeepingBackground({id:'A'})`);
+  assert.deepEqual(a.json('put'),[],'another project opened meanwhile gets nothing');
+});
+
 test('archived attachments have a read-only navigation and achievements entry without active project actions',()=>{
   const a=app(),elements={};
   a.context.document={querySelector:s=>elements[s]||(elements[s]={dataset:{},classList:{toggle(){}}}),querySelectorAll:()=>[]};

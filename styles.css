@@ -12237,9 +12237,10 @@ body.is-resizing-agent { user-select: none; }
   font-size: 11.5px;
 }
 
-.space-files.is-over {
+#projectSpace.is-over {
   outline: 2px dashed var(--accent);
-  outline-offset: -6px;
+  outline-offset: 4px;
+  border-radius: 12px;
   background: var(--accent-soft);
 }
 
