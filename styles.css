@@ -12188,6 +12188,7 @@ body.is-resizing-agent { user-select: none; }
   outline: 2px dashed var(--accent);
   outline-offset: 4px;
   border-radius: 12px;
+  background: var(--accent-soft);
 }
 
 /* 分工 reads as text until it is edited. */

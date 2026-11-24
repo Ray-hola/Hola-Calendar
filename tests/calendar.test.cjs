@@ -1578,7 +1578,7 @@ test('files dragged in from another app upload anywhere in the project space, fo
   const a=app(),elements={};
   const node=()=>({dataset:{},classList:{on:new Set(),toggle(c,v){v?this.on.add(c):this.on.delete(c)}},contains:()=>false});
   a.context.document={querySelector:s=>elements[s]||(elements[s]=node()),querySelectorAll:()=>[]};
-  a.run(`var uploads=[],toasts=[];uploadProjectFiles=(p,files)=>uploads.push([p.id,files.map(f=>f.name)]);toast=m=>toasts.push(m);
+  a.run(`var uploads=[],toasts=[];uploadProjectFiles=(p,files,skipped)=>uploads.push([p.id,files.map(f=>f.name),skipped]);toast=m=>toasts.push(m);
     S.today='2026-11-03';S.user={id:'test001',admin:0};UI.view='projects';S.files=[];S.tasks=[];
     S.projects=[{id:'live',name:'进行中',owner:'test001',status:'active',members:{test001:'accepted'}}];
     S.fileArchives=[{id:'old',name:'已交付项目',owner:'test001',status:'done'}];
@@ -1589,10 +1589,14 @@ test('files dragged in from another app upload anywhere in the project space, fo
   const over=event(['Files']);space.ondragover(over);
   assert.ok(over.prevented&&over.dataTransfer.dropEffect==='copy'&&space.classList.on.has('is-over'));
   const dir={kind:'file',webkitGetAsEntry:()=>({isDirectory:true})},file={kind:'file',webkitGetAsEntry:()=>({isDirectory:false})};
-  space.ondrop(event(['Files'],{files:[{name:'方案.pdf'},{name:'素材'}],items:[file,dir]}));
+  const web=event(['Files','text/uri-list','text/html']);space.ondragover(web);
+  assert.equal(web.prevented,false,'an image dragged from a web page stays a link drop');
+  space.ondrop(event(['Files'],{files:[{name:'方案.pdf',size:9,type:'application/pdf'},{name:'素材',size:0,type:''}],items:[file,dir]}));
   assert.ok(!space.classList.on.has('is-over'));
-  assert.deepEqual(a.json('uploads'),[['live',['方案.pdf']]]);
-  assert.equal(a.json('toasts').length,1,'a dropped folder is said, not silently dropped');
+  assert.deepEqual(a.json('uploads'),[['live',['方案.pdf'],1]],'the skipped folder is counted in the upload message');
+  space.ondrop(event(['Files'],{files:[{name:'资料',size:0,type:''}],items:[]}));
+  assert.equal(a.json('uploads').length,1,'without entries a folder is still told apart');
+  assert.equal(a.json('toasts').length,1,'a folder-only drop says why nothing uploaded');
   a.run(`UI.space='old';renderProjects();`);
   assert.equal(space.ondrop,null,'an archive takes no drop');
 });

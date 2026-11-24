@@ -2342,9 +2342,9 @@ async function openMarkdownFile(p,id){
     finally{if(input.isConnected){save.textContent=tr('保存');save.disabled=input.value===saved}}
   };
 }
-async function uploadProjectFiles(p,list){
+async function uploadProjectFiles(p,list,skipped=0){
   const files=[...list];if(!files.length)return;
-  const big=files.find(f=>f.size>MAX_FILE_MB*1048576);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
+  const big=files.find(f=>f.size>MAX_FILE_MB*1000000);if(big){toast(tr('「{0}」超过 {1}MB',big.name,MAX_FILE_MB));return}
   toast(tr('正在上传 {0} 个文件…',files.length));
   try{
     for(const f of files){
@@ -2352,7 +2352,7 @@ async function uploadProjectFiles(p,list){
         headers:{'Content-Type':f.type||'application/octet-stream','X-Work-Calendar':'1','X-File-Name':encodeURIComponent(f.name)}});
       const x=await readJSON(r);if(!r.ok)throw new Error(trServer(x.error)||tr('「{0}」上传未完成',f.name));
     }
-    await refresh();toast(tr('已上传 {0} 个文件',files.length));
+    await refresh();toast(skipped?tr('已上传 {0} 个文件，跳过了 {1} 个文件夹',files.length,skipped):tr('已上传 {0} 个文件',files.length));
   }catch(e){toast(e.message);refresh()}
 }
 /* Background and 分工 save in place without a full refresh, so typing in one
@@ -2400,13 +2400,21 @@ function bindProjectSpace(p){
   zone.ondrop=e=>{
     if(!dragHasFiles(e))return;
     e.preventDefault();zone.classList.toggle('is-over',false);
-    const entries=[...(e.dataTransfer.items||[])].filter(i=>i.kind==='file'),isFolder=i=>Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory);
-    const files=[...e.dataTransfer.files].filter((f,i)=>!isFolder(i));
-    if(files.length<e.dataTransfer.files.length)toast(tr('文件夹不能直接上传，请拖入其中的文件'));
-    if(files.length)uploadProjectFiles(p,files);
+    const all=[...e.dataTransfer.files],entries=[...(e.dataTransfer.items||[])].filter(i=>i.kind==='file');
+    /* Without a matching entry per file, a folder shows as an empty file with no type. */
+    const isFolder=(f,i)=>entries.length===all.length?Boolean(entries[i]?.webkitGetAsEntry?.()?.isDirectory):!f.size&&!f.type;
+    const files=all.filter((f,i)=>!isFolder(f,i)),skipped=all.length-files.length;
+    if(!files.length){if(skipped)toast(tr('文件夹不能直接上传，请拖入其中的文件'));return}
+    /* The upload re-renders the space; 项目背景 typed but not saved is put back. */
+    const save=$('#saveBackground'),draft=save?.disabled===false?docText($('#spaceBackground')):null;
+    Promise.resolve(uploadProjectFiles(p,files,skipped)).then(()=>{
+      const root=$('#spaceBackgroundEditor');if(draft==null||!root)return;
+      mdSet(root,draft);mdShow(root,'edit',false);$('#spaceBackground')?.oninput?.();
+    });
   };
 }
-const dragHasFiles=e=>[...(e.dataTransfer?.types||[])].includes('Files');
+/* An image dragged from a web page also carries its address, and stays a link drop. */
+const dragHasFiles=e=>{const types=[...(e.dataTransfer?.types||[])];return types.includes('Files')&&!types.includes('text/uri-list')};
 /* One task line under a project or the 临时任务 card. `who` is ready HTML. */
 function projectChildRow(t,who,{title='',drag='',tail=''}={}){
   const end=S.projects.find(p=>p.id===t.projectId)?.end,beyond=Boolean(end&&t.date>end);

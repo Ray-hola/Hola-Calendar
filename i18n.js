@@ -468,6 +468,7 @@ var HOLA_I18N_EN={
   '「{0}」超过 {1}MB':'“{0}” is over {1}MB',
   '正在上传 {0} 个文件…':'Uploading {0} files…',
   '「{0}」上传未完成':'“{0}” didn’t finish uploading',
+  '已上传 {0} 个文件，跳过了 {1} 个文件夹':'Uploaded {0} files; skipped {1} folders',
   '文件夹不能直接上传，请拖入其中的文件':'Folders can’t be uploaded; drag in the files inside instead',
   '已上传 {0} 个文件':'Uploaded {0} files',
   '项目背景已保存':'Background saved',
